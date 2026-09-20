@@ -7,9 +7,10 @@ import { MaterialsModule } from './materials/materials.module';
 import { ChatroomsModule } from './chatrooms/chatrooms.module';
 import { MessagesModule } from './messages/messages.module';
 import { PrismaModule } from './prisma.module';
+import { SqlModule } from './sql/sql.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, UsersModule, MaterialsModule, ChatroomsModule, MessagesModule],
+  imports: [PrismaModule, AuthModule, UsersModule, MaterialsModule, ChatroomsModule, MessagesModule, SqlModule],
   controllers: [AppController],
   providers: [AppService],
 })
