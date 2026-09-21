@@ -1,7 +1,7 @@
 generator client {
-  provider     = "prisma-client"
-  output       = "../src/generated/prisma"
-  moduleFormat = "cjs"
+  provider      = "prisma-client"
+  output        = "../src/generated/prisma"
+  moduleFormat  = "cjs"
   binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
@@ -15,27 +15,45 @@ model User {
   passwordHash    String
   fullName        String
   major           String
-  faculty         String
+  faculty         String?
   rating          Float      @default(0)
   createdAt       DateTime   @default(now())
   buyerChatRooms  ChatRoom[] @relation("ChatRoomBuyer")
   sellerChatRooms ChatRoom[] @relation("ChatRoomSeller")
   materials       Material[]
   sentMessages    Message[]
+
+  buyerExchanges  Exchange[] @relation("ExchangeBuyer")
+  sellerExchanges Exchange[] @relation("ExchangeSeller")
+
+  wishlistItems   WishlistItem[]
+  notifications   Notification[]
+  analyticsEvents AnalyticsEvent[]
 }
 
 model Material {
-  id          String            @id @default(uuid()) @db.Uuid
+  id          String             @id @default(uuid()) @db.Uuid
   title       String
   description String
-  courseCode  String
-  price       Decimal           @db.Decimal(10, 2)
-  condition   MaterialCondition
-  status      MaterialStatus    @default(AVAILABLE)
+  courseCode  String?
+  price       Decimal            @db.Decimal(10, 2)
+  condition   MaterialCondition?
+  status      MaterialStatus     @default(AVAILABLE)
+  edition     String?
+  model       String?
   imageUrls   String[]
-  sellerId    String            @db.Uuid
+  sellerId    String             @db.Uuid
   chatRooms   ChatRoom[]
-  seller      User              @relation(fields: [sellerId], references: [id])
+  seller      User               @relation(fields: [sellerId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  category        MaterialCategory
+  exchange        Exchange?
+  wishlistItems   WishlistItem[]
+  notifications   Notification[]
+  analyticsEvents AnalyticsEvent[]
 
   @@index([courseCode])
   @@index([status])
@@ -72,6 +90,72 @@ model Message {
   @@index([senderId])
 }
 
+model Exchange {
+  id          String   @id @default(uuid()) @db.Uuid
+  materialId  String   @unique @db.Uuid
+  buyerId     String   @db.Uuid
+  sellerId    String   @db.Uuid
+  price       Decimal  @db.Decimal(10, 2)
+  completedAt DateTime @default(now())
+
+  material Material @relation(fields: [materialId], references: [id])
+  buyer    User     @relation("ExchangeBuyer", fields: [buyerId], references: [id])
+  seller   User     @relation("ExchangeSeller", fields: [sellerId], references: [id])
+
+  //@@index([materialId])
+  @@index([buyerId])
+  @@index([sellerId])
+  @@index([completedAt])
+}
+
+model WishlistItem {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @db.Uuid
+  materialId String   @db.Uuid
+  createdAt  DateTime @default(now())
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  material Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, materialId])
+  @@index([userId])
+  @@index([materialId])
+}
+
+model Notification {
+  id         String           @id @default(uuid()) @db.Uuid
+  userId     String           @db.Uuid
+  materialId String?          @db.Uuid
+  type       NotificationType
+  sentAt     DateTime         @default(now())
+  openedAt   DateTime?
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  material Material? @relation(fields: [materialId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([materialId])
+  @@index([type])
+  @@index([sentAt])
+}
+
+model AnalyticsEvent {
+  id         String             @id @default(uuid()) @db.Uuid
+  userId     String?            @db.Uuid
+  materialId String?            @db.Uuid
+  eventType  AnalyticsEventType
+  metadata   Json?
+  occurredAt DateTime           @default(now())
+
+  user     User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  material Material? @relation(fields: [materialId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([materialId])
+  @@index([eventType])
+  @@index([occurredAt])
+}
+
 enum MaterialCondition {
   NEW
   LIKE_NEW
@@ -83,4 +167,27 @@ enum MaterialStatus {
   AVAILABLE
   RESERVED
   SOLD
+}
+
+enum MaterialCategory {
+  BOOKS
+  CALCULATORS
+  LAB_EQUIPMENT
+  FURNITURE
+  OTHER
+}
+
+enum NotificationType {
+  SMART_MATCH
+  OTHER
+}
+
+enum AnalyticsEventType {
+  LISTING_VIEW
+  SEARCH
+  CONTACT_SELLER
+  WISHLIST_ADD
+  WISHLIST_REMOVE
+  NOTIFICATION_SENT
+  NOTIFICATION_OPENED
 }
