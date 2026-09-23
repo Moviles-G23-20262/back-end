@@ -3,6 +3,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import {
   MaterialCategory,
   MaterialCondition,
+  MaterialStatus,
   MeetingZoneType,
   PrismaClient,
 } from '../src/generated/prisma/client';
@@ -10,6 +11,8 @@ import {
 const userId = (n: number) => `a0000000-0000-4000-8000-${n.toString(16).padStart(12, '0')}`;
 const materialId = (n: number) => `b0000000-0000-4000-8000-${n.toString(16).padStart(12, '0')}`;
 const meetingPointId = (n: number) => `c0000000-0000-4000-8000-${n.toString(16).padStart(12, '0')}`;
+const historyMaterialId = (n: number) => `d0000000-0000-4000-8000-${n.toString(16).padStart(12, '0')}`;
+const historyExchangeId = (n: number) => `e0000000-0000-4000-8000-${n.toString(16).padStart(12, '0')}`;
 
 const SEED_PASSWORD_HASH = 'seed-user-no-login';
 
@@ -63,6 +66,35 @@ const meetingPoints: SeedMeetingPoint[] = [
   { n: 4, name: 'Plazoleta Lleras', detail: 'Open area in front of Lleras building', zoneType: MeetingZoneType.PLAZA, isMonitored: false, coords: PLAZOLETA_LLERAS },
 ];
 
+const HISTORY_DAYS = [
+  '2026-09-07', '2026-09-08', '2026-09-09', '2026-09-10', '2026-09-11',
+  '2026-09-14', '2026-09-15', '2026-09-16', '2026-09-17', '2026-09-18',
+];
+
+const exchangesPerHour: { point: number; hours: Record<number, number> }[] = [
+  { point: 1, hours: { 8: 1, 9: 2, 10: 4, 11: 3, 14: 3, 15: 4, 16: 2, 17: 1 } },
+  { point: 3, hours: { 7: 1, 9: 1, 12: 2, 13: 2, 16: 3, 17: 4, 18: 3, 19: 2 } },
+  { point: 4, hours: { 11: 2, 12: 5, 13: 6, 14: 3, 15: 1 } },
+];
+
+const HISTORY_CATEGORIES = [BOOKS, CALCULATORS, LAB_EQUIPMENT, OTHER];
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function historicalExchanges() {
+  const rows: { n: number; point: number; completedAt: Date }[] = [];
+  for (const { point, hours } of exchangesPerHour) {
+    for (const [hour, count] of Object.entries(hours)) {
+      for (let i = 0; i < count; i++) {
+        const n = rows.length + 1;
+        const day = HISTORY_DAYS[n % HISTORY_DAYS.length];
+        const time = `${hour.padStart(2, '0')}:${String((n * 7) % 60).padStart(2, '0')}`;
+        rows.push({ n, point, completedAt: new Date(`${day}T${time}:00-05:00`) });
+      }
+    }
+  }
+  return rows;
+}
+
 async function main() {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) throw new Error('DATABASE_URL is not defined');
@@ -79,6 +111,7 @@ async function main() {
       await prisma.material.upsert({ where: { id: materialId(n) }, update: data, create: { id: materialId(n), ...data } });
     }
 
+    const seededPoints = new Map<number, { lat: number; lng: number }>();
     for (const { n, coords, ...fields } of meetingPoints) {
       if (!coords) {
         console.warn(`Skipping meeting point "${fields.name}": coordinates not set yet`);
@@ -86,9 +119,40 @@ async function main() {
       }
       const data = { ...fields, ...coords };
       await prisma.meetingPoint.upsert({ where: { id: meetingPointId(n) }, update: data, create: { id: meetingPointId(n), ...data } });
+      seededPoints.set(n, coords);
     }
 
-    console.log(`Seeded ${users.length} users and ${materials.length} materials`);
+    const history = historicalExchanges().filter(({ point }) => seededPoints.has(point));
+    for (const { n, point, completedAt } of history) {
+      const seller = (n % 4) + 1;
+      const buyer = (seller % 4) + 1;
+      const price = String(20000 + (n % 8) * 5000);
+      const material = {
+        title: `Campus exchange #${n}`,
+        description: 'Historical exchange for BQ12',
+        price,
+        category: HISTORY_CATEGORIES[n % HISTORY_CATEGORIES.length],
+        condition: GOOD,
+        status: MaterialStatus.SOLD,
+        sellerId: userId(seller),
+        createdAt: new Date(completedAt.getTime() - 3 * DAY_MS),
+      };
+      await prisma.material.upsert({ where: { id: historyMaterialId(n) }, update: material, create: { id: historyMaterialId(n), ...material } });
+
+      const coords = n % 4 === 0 ? { lat: null, lng: null } : seededPoints.get(point)!;
+      const exchange = {
+        materialId: historyMaterialId(n),
+        buyerId: userId(buyer),
+        sellerId: userId(seller),
+        price,
+        meetingPointId: meetingPointId(point),
+        ...coords,
+        completedAt,
+      };
+      await prisma.exchange.upsert({ where: { id: historyExchangeId(n) }, update: exchange, create: { id: historyExchangeId(n), ...exchange } });
+    }
+
+    console.log(`Seeded ${users.length} users, ${materials.length} materials and ${history.length} historical exchanges`);
   } finally {
     await prisma.$disconnect();
   }
