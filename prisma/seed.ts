@@ -7,13 +7,10 @@ import {
   PrismaClient,
 } from '../src/generated/prisma/client';
 
-// Fixed UUIDs mirror com.campusswap.app.data.SeedIds in the Android app, which still renders
-// SampleData. Keep both files in sync until the catalog is served by this backend.
 const userId = (n: number) => `a0000000-0000-4000-8000-${n.toString(16).padStart(12, '0')}`;
 const materialId = (n: number) => `b0000000-0000-4000-8000-${n.toString(16).padStart(12, '0')}`;
 const meetingPointId = (n: number) => `c0000000-0000-4000-8000-${n.toString(16).padStart(12, '0')}`;
 
-// Auth is owned by another teammate; seeded users cannot log in with this value.
 const SEED_PASSWORD_HASH = 'seed-user-no-login';
 
 const users = [
@@ -27,7 +24,6 @@ const users = [
 const { CALCULATORS, BOOKS, LAB_EQUIPMENT, OTHER } = MaterialCategory;
 const { LIKE_NEW, GOOD, FAIR } = MaterialCondition;
 
-// n = SampleData product number (p1..p12), seller = SampleData seller number (0 = "me").
 const materials = [
   { n: 1, seller: 1, title: 'TI-Nspire CX CAS Graphing Calculator', price: '320000', category: CALCULATORS, condition: LIKE_NEW, courseCode: 'MATH-201' },
   { n: 2, seller: 2, title: 'Calculus: Early Transcendentals, 9th Ed.', price: '145000', category: BOOKS, condition: GOOD, courseCode: 'MATH-201', edition: '9th' },
@@ -45,12 +41,11 @@ const materials = [
 
 type Coordinates = { lat: number; lng: number } | null;
 
-// Taken from OpenStreetMap (Sep 2026); must match SampleData in the Android app. Points left null are skipped.
 // TODO(carla): verificar en Google Maps que cada punto cae en la entrada correcta.
-const CENTRAL_LIBRARY: Coordinates = { lat: 4.602948, lng: -74.064829 }; // OSM library node "Ramon de Zubiria"
+const CENTRAL_LIBRARY: Coordinates = { lat: 4.602948, lng: -74.064829 };
 const STUDENT_CENTER: Coordinates = null; // TODO(carla): coordenadas — Centro Cívico is not mapped in OSM yet
-const MARIO_LASERNA: Coordinates = { lat: 4.602725, lng: -74.064696 }; // OSM address point, Cra 1 Este #19A-40
-const PLAZOLETA_LLERAS: Coordinates = { lat: 4.601859, lng: -74.065176 }; // OSM square "Plazoleta Lleras", centroid
+const MARIO_LASERNA: Coordinates = { lat: 4.602725, lng: -74.064696 };
+const PLAZOLETA_LLERAS: Coordinates = { lat: 4.601859, lng: -74.065176 };
 
 type SeedMeetingPoint = {
   n: number;
@@ -61,7 +56,6 @@ type SeedMeetingPoint = {
   coords: Coordinates;
 };
 
-// n = SampleData meeting point number (mp1..mp4).
 const meetingPoints: SeedMeetingPoint[] = [
   { n: 1, name: 'Central Library lobby', detail: 'Main entrance, next to the security desk', zoneType: MeetingZoneType.LIBRARY, isMonitored: true, coords: CENTRAL_LIBRARY },
   { n: 2, name: 'Student Center plaza', detail: 'Open plaza by the food court', zoneType: MeetingZoneType.STUDENT_CENTER, isMonitored: true, coords: STUDENT_CENTER },
@@ -75,7 +69,6 @@ async function main() {
   const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
 
   try {
-    // Upserts keep the seed idempotent: running it twice never duplicates rows.
     for (const { n, email, fullName, rating } of users) {
       const data = { email, fullName, rating: rating ?? 0, major: 'Undeclared', passwordHash: SEED_PASSWORD_HASH };
       await prisma.user.upsert({ where: { id: userId(n) }, update: data, create: { id: userId(n), ...data } });

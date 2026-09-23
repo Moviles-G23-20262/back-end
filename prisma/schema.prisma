@@ -98,8 +98,6 @@ model Exchange {
   price       Decimal  @db.Decimal(10, 2)
   completedAt DateTime @default(now())
 
-  // Where the exchange happened (BQ12). Nullable: older exchanges have no location and a
-  // manual confirmation (GPS denied/off) records the meeting point without coordinates.
   meetingPointId String? @db.Uuid
   lat            Float?
   lng            Float?
