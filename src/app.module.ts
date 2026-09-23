@@ -12,6 +12,7 @@ import { ExchangesModule } from './exchanges/exchanges.module';
 import { WishlistItemsModule } from './wishlist-items/wishlist-items.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { AnalyticsEventsModule } from './analytics-events/analytics-events.module';
+import { MeetingPointsModule } from './meeting-points/meeting-points.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { AnalyticsEventsModule } from './analytics-events/analytics-events.modul
     WishlistItemsModule,
     NotificationsModule,
     AnalyticsEventsModule,
+    MeetingPointsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
