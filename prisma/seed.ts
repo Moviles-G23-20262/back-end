@@ -45,11 +45,12 @@ const materials = [
 
 type Coordinates = { lat: number; lng: number } | null;
 
-// TODO(carla): coordenadas — fill each point from Google Maps. Points left null are skipped.
-const CENTRAL_LIBRARY: Coordinates = null;
-const STUDENT_CENTER: Coordinates = null;
-const MARIO_LASERNA: Coordinates = null;
-const PLAZOLETA_LLERAS: Coordinates = null;
+// Taken from OpenStreetMap (Sep 2026); must match SampleData in the Android app. Points left null are skipped.
+// TODO(carla): verificar en Google Maps que cada punto cae en la entrada correcta.
+const CENTRAL_LIBRARY: Coordinates = { lat: 4.602948, lng: -74.064829 }; // OSM library node "Ramon de Zubiria"
+const STUDENT_CENTER: Coordinates = null; // TODO(carla): coordenadas — Centro Cívico is not mapped in OSM yet
+const MARIO_LASERNA: Coordinates = { lat: 4.602725, lng: -74.064696 }; // OSM address point, Cra 1 Este #19A-40
+const PLAZOLETA_LLERAS: Coordinates = { lat: 4.601859, lng: -74.065176 }; // OSM square "Plazoleta Lleras", centroid
 
 type SeedMeetingPoint = {
   n: number;
