@@ -5,7 +5,7 @@ import { PrismaService } from '../prisma.service';
 
 describe('MeetingPointsService', () => {
   let service: MeetingPointsService;
-  const prisma = { meetingPoint: { findMany: jest.fn(), findUnique: jest.fn() } };
+  const prisma = { meetingPoint: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn(), delete: jest.fn() } };
 
   beforeEach(async () => {
     jest.resetAllMocks();
@@ -26,5 +26,20 @@ describe('MeetingPointsService', () => {
     prisma.meetingPoint.findUnique.mockResolvedValue(null);
 
     await expect(service.findOne('missing')).rejects.toThrow(NotFoundException);
+  });
+
+  it('does not update a point that does not exist', async () => {
+    prisma.meetingPoint.findUnique.mockResolvedValue(null);
+
+    await expect(service.update('missing', { name: 'New name' })).rejects.toThrow(NotFoundException);
+    expect(prisma.meetingPoint.update).not.toHaveBeenCalled();
+  });
+
+  it('deletes an existing point', async () => {
+    prisma.meetingPoint.findUnique.mockResolvedValue({ id: 'p1' });
+
+    await service.remove('p1');
+
+    expect(prisma.meetingPoint.delete).toHaveBeenCalledWith({ where: { id: 'p1' } });
   });
 });
