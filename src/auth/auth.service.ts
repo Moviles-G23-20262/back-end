@@ -1,27 +1,39 @@
-import { Injectable } from '@nestjs/common';
-import { CreateAuthDto } from './dto/create-auth.dto';
-import { UpdateAuthDto } from './dto/update-auth.dto';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { compare, hashSync } from 'bcryptjs';
+import { UsersService } from '../users/users.service';
+import { CreateUserDto } from '../users/dto/create-user.dto';
+import { LoginDto } from './dto/login.dto';
+
+// Compared against when the email doesn't exist so response time doesn't reveal which emails are registered.
+const DUMMY_HASH = hashSync('dummy-password', 10);
 
 @Injectable()
 export class AuthService {
-  
-  create(createAuthDto: CreateAuthDto) {
-    return 'This action adds a new auth';
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly jwtService: JwtService,
+  ) {}
+
+  async register(createUserDto: CreateUserDto) {
+    const user = await this.usersService.create(createUserDto);
+    return { user, accessToken: await this.signToken(user) };
   }
 
-  findAll() {
-    return `This action returns all auth`;
+  async login({ email, password }: LoginDto) {
+    const found = await this.usersService.findByEmailWithHash(email);
+    const passwordMatches = await compare(password, found?.passwordHash ?? DUMMY_HASH);
+    if (!found || !passwordMatches) throw new UnauthorizedException('Invalid credentials');
+
+    const { passwordHash: _passwordHash, ...user } = found;
+    return { user, accessToken: await this.signToken(user) };
   }
 
-  findOne(id: number) {
-    return `This action returns a #${id} auth`;
+  me(userId: string) {
+    return this.usersService.findOne(userId);
   }
 
-  update(id: number, updateAuthDto: UpdateAuthDto) {
-    return `This action updates a #${id} auth`;
-  }
-
-  remove(id: number) {
-    return `This action removes a #${id} auth`;
+  private signToken(user: { id: string; email: string }) {
+    return this.jwtService.signAsync({ sub: user.id, email: user.email });
   }
 }
