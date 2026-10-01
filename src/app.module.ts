@@ -13,6 +13,7 @@ import { WishlistItemsModule } from './wishlist-items/wishlist-items.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { AnalyticsEventsModule } from './analytics-events/analytics-events.module';
 import { MeetingPointsModule } from './meeting-points/meeting-points.module';
+import { RatingsModule } from './ratings/ratings.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { MeetingPointsModule } from './meeting-points/meeting-points.module';
     NotificationsModule,
     AnalyticsEventsModule,
     MeetingPointsModule,
+    RatingsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
