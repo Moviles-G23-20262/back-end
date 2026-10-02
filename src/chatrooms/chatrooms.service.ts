@@ -66,7 +66,11 @@ export class ChatroomsService {
   async findOne(id: string, auth: AuthContext) {
     const chatroom = await this.prisma.chatRoom.findUnique({
       where: { id },
-      include: { material: true, ...parties, messages: { orderBy: { createdAt: 'asc' } } },
+      include: {
+        material: true,
+        ...parties,
+        messages: { orderBy: { createdAt: 'asc' }, include: { meetingProposal: { include: { meetingPoint: true } } } },
+      },
     });
     if (!chatroom) throw new NotFoundException(`Chatroom ${id} not found`);
     this.assertParticipant(chatroom, auth);

@@ -6,7 +6,11 @@ import { PrismaService } from '../prisma.service';
 import { actingUserId, participantWhere, requireUserId, type AuthContext } from '../auth/auth-context';
 import { userSummarySelect } from '../users/public-user.select';
 
-const withSender = { sender: { select: userSummarySelect } } as const;
+const withSender = {
+  sender: { select: userSummarySelect },
+  // MEETING messages render as a card with the proposal's current status.
+  meetingProposal: { include: { meetingPoint: true } },
+} as const;
 
 @Injectable()
 export class MessagesService {

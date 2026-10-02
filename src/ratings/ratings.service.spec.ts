@@ -39,19 +39,19 @@ describe('RatingsService', () => {
   });
 
   it('rejects users that are not part of the exchange', async () => {
-    prisma.exchange.findUnique.mockResolvedValue({ buyerId: buyer, sellerId: seller });
+    prisma.exchange.findUnique.mockResolvedValue({ buyerId: buyer, sellerId: seller, status: 'COMPLETED' });
     const outsider = '44444444-4444-4444-8444-444444444444';
     await expect(service.create({ ...base, raterId: outsider }, admin)).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('rejects a second rating for the same exchange', async () => {
-    prisma.exchange.findUnique.mockResolvedValue({ buyerId: buyer, sellerId: seller });
+    prisma.exchange.findUnique.mockResolvedValue({ buyerId: buyer, sellerId: seller, status: 'COMPLETED' });
     prisma.rating.findUnique.mockResolvedValue({ id: 'existing' });
     await expect(service.create(base, admin)).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('creates the rating and updates the rated user average', async () => {
-    prisma.exchange.findUnique.mockResolvedValue({ buyerId: buyer, sellerId: seller });
+    prisma.exchange.findUnique.mockResolvedValue({ buyerId: buyer, sellerId: seller, status: 'COMPLETED' });
     prisma.rating.findUnique.mockResolvedValue(null);
     tx.rating.create.mockResolvedValue({ id: 'r1', ...base, tags: [] });
     tx.rating.aggregate.mockResolvedValue({ _avg: { stars: 4.5 } });
@@ -64,7 +64,7 @@ describe('RatingsService', () => {
 
   it('rates as the signed-in user, ignoring the raterId sent in the body', async () => {
     const outsider = '44444444-4444-4444-8444-444444444444';
-    prisma.exchange.findUnique.mockResolvedValue({ buyerId: buyer, sellerId: seller });
+    prisma.exchange.findUnique.mockResolvedValue({ buyerId: buyer, sellerId: seller, status: 'COMPLETED' });
     prisma.rating.findUnique.mockResolvedValue(null);
     tx.rating.create.mockResolvedValue({ id: 'r1' });
     tx.rating.aggregate.mockResolvedValue({ _avg: { stars: 5 } });

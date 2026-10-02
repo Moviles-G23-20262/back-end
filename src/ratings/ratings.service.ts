@@ -18,9 +18,12 @@ export class RatingsService {
 
     const exchange = await this.prisma.exchange.findUnique({
       where: { id: exchangeId },
-      select: { buyerId: true, sellerId: true },
+      select: { buyerId: true, sellerId: true, status: true },
     });
     if (!exchange) throw new NotFoundException(`Exchange ${exchangeId} not found`);
+    if (exchange.status !== 'COMPLETED') {
+      throw new BadRequestException('You can rate each other once the exchange is completed');
+    }
 
     const parties = [exchange.buyerId, exchange.sellerId];
     if (!parties.includes(raterId) || !parties.includes(ratedId)) {

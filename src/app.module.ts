@@ -15,6 +15,8 @@ import { AnalyticsEventsModule } from './analytics-events/analytics-events.modul
 import { MeetingPointsModule } from './meeting-points/meeting-points.module';
 import { RatingsModule } from './ratings/ratings.module';
 import { UploadsModule } from './uploads/uploads.module';
+import { MeetingProposalsModule } from './meeting-proposals/meeting-proposals.module';
+import { ScheduleBlocksModule } from './schedule-blocks/schedule-blocks.module';
 
 @Module({
   imports: [
@@ -32,6 +34,8 @@ import { UploadsModule } from './uploads/uploads.module';
     MeetingPointsModule,
     RatingsModule,
     UploadsModule,
+    MeetingProposalsModule,
+    ScheduleBlocksModule,
   ],
   controllers: [AppController],
   providers: [AppService],

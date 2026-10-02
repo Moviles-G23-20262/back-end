@@ -1,4 +1,5 @@
-import { IsNumber, IsOptional, IsUUID, Matches, Max, Min } from 'class-validator';
+import { IsEnum, IsNumber, IsOptional, IsUUID, Matches, Max, Min } from 'class-validator';
+import { ExchangeStatus } from '../../generated/prisma/client';
 
 export class CreateExchangeDto {
   @IsUUID()
@@ -12,6 +13,11 @@ export class CreateExchangeDto {
 
   @Matches(/^\d+(\.\d{1,2})?$/)
   price!: string;
+
+  /** Exchanges recorded from the dashboard are finished sales unless said otherwise. */
+  @IsOptional()
+  @IsEnum(ExchangeStatus)
+  status?: ExchangeStatus;
 
   @IsOptional()
   @IsUUID()
