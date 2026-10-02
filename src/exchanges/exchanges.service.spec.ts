@@ -136,6 +136,23 @@ describe('ExchangesService', () => {
       );
     });
 
+    it('stores the coordinates measured at the meetup when the buyer sends them', async () => {
+      prisma.exchange.findUnique.mockResolvedValue(pending);
+
+      await service.complete(exchangeId, { lat: 4.6031, lng: -74.0648 }, asBuyer);
+
+      const [{ data }] = tx.exchange.update.mock.calls[0] as [{ data: Record<string, unknown> }];
+      expect(data).toMatchObject({ status: 'COMPLETED', lat: 4.6031, lng: -74.0648 });
+      expect(data.completedAt).toBeInstanceOf(Date);
+    });
+
+    it('rejects a latitude without longitude on completion', async () => {
+      prisma.exchange.findUnique.mockResolvedValue(pending);
+
+      await expect(service.complete(exchangeId, { lat: 4.6031 }, asBuyer)).rejects.toThrow(BadRequestException);
+      expect(tx.exchange.update).not.toHaveBeenCalled();
+    });
+
     it('does not let the seller complete', async () => {
       prisma.exchange.findUnique.mockResolvedValue(pending);
 

@@ -91,8 +91,11 @@ export class ExchangesService {
   }
 
   /** The buyer checked the item at the meetup: the sale is done and the listing is SOLD. */
-  async complete(id: string, { receivedCondition }: CompleteExchangeDto, auth: AuthContext) {
+  async complete(id: string, { receivedCondition, lat, lng }: CompleteExchangeDto, auth: AuthContext) {
     const userId = requireUserId(auth);
+    if ((lat === undefined) !== (lng === undefined)) {
+      throw new BadRequestException('lat and lng must be sent together');
+    }
     const exchange = await this.findOne(id, auth);
     if (exchange.buyerId !== userId) throw new ForbiddenException('Only the buyer can complete the exchange');
     this.assertPending(exchange.status);
@@ -101,7 +104,7 @@ export class ExchangesService {
       await tx.material.update({ where: { id: exchange.materialId }, data: { status: 'SOLD' } });
       return tx.exchange.update({
         where: { id },
-        data: { status: 'COMPLETED', completedAt: new Date(), receivedCondition },
+        data: { status: 'COMPLETED', completedAt: new Date(), receivedCondition, ...(lat !== undefined && { lat, lng }) },
         include: details,
       });
     });
