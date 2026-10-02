@@ -14,6 +14,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { AnalyticsEventsModule } from './analytics-events/analytics-events.module';
 import { MeetingPointsModule } from './meeting-points/meeting-points.module';
 import { RatingsModule } from './ratings/ratings.module';
+import { UploadsModule } from './uploads/uploads.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { RatingsModule } from './ratings/ratings.module';
     AnalyticsEventsModule,
     MeetingPointsModule,
     RatingsModule,
+    UploadsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

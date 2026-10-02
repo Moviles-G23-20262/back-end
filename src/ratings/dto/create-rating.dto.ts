@@ -4,8 +4,10 @@ export class CreateRatingDto {
   @IsUUID()
   exchangeId!: string;
 
+  // App users always rate as themselves; only admins (dashboard) have to send it.
+  @IsOptional()
   @IsUUID()
-  raterId!: string;
+  raterId?: string;
 
   @IsUUID()
   ratedId!: string;

@@ -30,7 +30,7 @@ export class AuthService {
   }
 
   me(userId: string) {
-    return this.usersService.findOne(userId);
+    return this.usersService.findOne(userId, { isAdmin: false, userId });
   }
 
   private signToken(user: { id: string; email: string }) {

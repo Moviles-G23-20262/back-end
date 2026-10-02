@@ -1,7 +1,9 @@
 import { Body, Controller, Post } from '@nestjs/common';
 import { QuerySqlDto } from './dto/query-sql.dto';
 import { SqlService } from './sql.service';
+import { AdminOnly } from '../auth/auth.decorators';
 
+@AdminOnly()
 @Controller('sql')
 export class SqlController {
   constructor(private readonly sqlService: SqlService) {}

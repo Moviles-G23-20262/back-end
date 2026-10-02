@@ -2,13 +2,16 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { PrismaService } from '../prisma.service';
 import { CreateRatingDto } from './dto/create-rating.dto';
 import { FindRatingsQueryDto } from './dto/find-ratings-query.dto';
+import { actingUserId, type AuthContext } from '../auth/auth-context';
+import { userSummarySelect } from '../users/public-user.select';
 
 @Injectable()
 export class RatingsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(createRatingDto: CreateRatingDto) {
-    const { exchangeId, raterId, ratedId } = createRatingDto;
+  async create(createRatingDto: CreateRatingDto, auth: AuthContext) {
+    const { exchangeId, ratedId } = createRatingDto;
+    const raterId = actingUserId(auth, createRatingDto.raterId, 'raterId');
     if (raterId === ratedId) {
       throw new BadRequestException('A user cannot rate themselves');
     }
@@ -32,7 +35,7 @@ export class RatingsService {
 
     return this.prisma.$transaction(async (tx) => {
       const rating = await tx.rating.create({
-        data: { ...createRatingDto, tags: createRatingDto.tags ?? [] },
+        data: { ...createRatingDto, raterId, tags: createRatingDto.tags ?? [] },
       });
       const { _avg } = await tx.rating.aggregate({
         where: { ratedId },
@@ -46,6 +49,7 @@ export class RatingsService {
   findAll(query: FindRatingsQueryDto) {
     return this.prisma.rating.findMany({
       where: { ratedId: query.userId, exchangeId: query.exchangeId },
+      include: { rater: { select: userSummarySelect } },
       orderBy: { createdAt: 'desc' },
     });
   }

@@ -37,8 +37,10 @@ export class CreateMaterialDto {
   @IsString({ each: true })
   imageUrls!: string[];
 
+  // App users always sell as themselves; only admins (dashboard) have to send it.
+  @IsOptional()
   @IsUUID()
-  sellerId!: string;
+  sellerId?: string;
 
   @IsEnum(MaterialCategory)
   category!: MaterialCategory;

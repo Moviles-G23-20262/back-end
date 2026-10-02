@@ -4,6 +4,8 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { PrismaService } from '../prisma.service';
 import { Prisma } from '../generated/prisma/client';
+import { assertSelfOrAdmin, type AuthContext } from '../auth/auth-context';
+import { publicUserSelect, userSummarySelect } from './public-user.select';
 
 const BCRYPT_ROUNDS = 10;
 
@@ -15,7 +17,7 @@ export class UsersService {
     try {
       return await this.prisma.user.create({
         data: { ...data, passwordHash: await hash(password, BCRYPT_ROUNDS) },
-        select: this.publicUserSelect,
+        select: publicUserSelect,
       });
     } catch (error) {
       this.rethrowUniqueEmail(error);
@@ -24,15 +26,16 @@ export class UsersService {
 
   findAll() {
     return this.prisma.user.findMany({
-      select: this.publicUserSelect,
+      select: publicUserSelect,
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  async findOne(id: string) {
+  /** Your own profile (or an admin) gets the full public profile; anyone else only a summary. */
+  async findOne(id: string, auth: AuthContext) {
     const user = await this.prisma.user.findUnique({
       where: { id },
-      select: this.publicUserSelect,
+      select: auth.isAdmin || auth.userId === id ? publicUserSelect : userSummarySelect,
     });
     if (!user) throw new NotFoundException(`User ${id} not found`);
     return user;
@@ -42,11 +45,12 @@ export class UsersService {
   findByEmailWithHash(email: string) {
     return this.prisma.user.findFirst({
       where: { email: { equals: email, mode: 'insensitive' } },
-      select: { ...this.publicUserSelect, passwordHash: true },
+      select: { ...publicUserSelect, passwordHash: true },
     });
   }
 
-  async update(id: string, { password, ...data }: UpdateUserDto) {
+  async update(id: string, { password, ...data }: UpdateUserDto, auth: AuthContext) {
+    assertSelfOrAdmin(auth, id);
     await this.ensureExists(id);
     try {
       return await this.prisma.user.update({
@@ -55,7 +59,7 @@ export class UsersService {
           ...data,
           ...(password !== undefined && { passwordHash: await hash(password, BCRYPT_ROUNDS) }),
         },
-        select: this.publicUserSelect,
+        select: publicUserSelect,
       });
     } catch (error) {
       this.rethrowUniqueEmail(error);
@@ -66,19 +70,9 @@ export class UsersService {
     await this.ensureExists(id);
     return this.prisma.user.delete({
       where: { id },
-      select: this.publicUserSelect,
+      select: publicUserSelect,
     });
   }
-
-  private readonly publicUserSelect = {
-    id: true,
-    email: true,
-    fullName: true,
-    major: true,
-    faculty: true,
-    rating: true,
-    createdAt: true,
-  } as const;
 
   private async ensureExists(id: string) {
     const exists = await this.prisma.user.findUnique({ where: { id }, select: { id: true } });

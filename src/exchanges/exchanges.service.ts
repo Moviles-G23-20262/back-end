@@ -1,7 +1,16 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { CreateExchangeDto } from './dto/create-exchange.dto';
 import { UpdateExchangeDto } from './dto/update-exchange.dto';
 import { PrismaService } from '../prisma.service';
+import { participantWhere, requireUserId, type AuthContext } from '../auth/auth-context';
+import { userSummarySelect } from '../users/public-user.select';
+
+const details = {
+  material: true,
+  buyer: { select: userSummarySelect },
+  seller: { select: userSummarySelect },
+  meetingPoint: true,
+} as const;
 
 @Injectable()
 export class ExchangesService {
@@ -15,23 +24,27 @@ export class ExchangesService {
 
     return this.prisma.exchange.create({
       data: createExchangeDto,
-      include: { material: true, buyer: true, seller: true, meetingPoint: true },
+      include: details,
     });
   }
 
-  findAll() {
+  findAll(auth: AuthContext) {
     return this.prisma.exchange.findMany({
-      include: { material: true, buyer: true, seller: true, meetingPoint: true },
+      where: auth.isAdmin ? undefined : participantWhere(requireUserId(auth)),
+      include: details,
       orderBy: { completedAt: 'desc' },
     });
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, auth: AuthContext) {
     const exchange = await this.prisma.exchange.findUnique({
       where: { id },
-      include: { material: true, buyer: true, seller: true, meetingPoint: true },
+      include: details,
     });
     if (!exchange) throw new NotFoundException(`Exchange ${id} not found`);
+    if (!auth.isAdmin && auth.userId !== exchange.buyerId && auth.userId !== exchange.sellerId) {
+      throw new ForbiddenException('You are not part of this exchange');
+    }
     return exchange;
   }
 
@@ -49,7 +62,7 @@ export class ExchangesService {
     return this.prisma.exchange.update({
       where: { id },
       data: updateExchangeDto,
-      include: { material: true, buyer: true, seller: true, meetingPoint: true },
+      include: details,
     });
   }
 

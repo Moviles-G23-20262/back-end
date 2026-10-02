@@ -2,22 +2,28 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma.service';
 import { CreateAnalyticsEventDto } from './dto/create-analytics-event.dto';
+import type { AuthContext } from '../auth/auth-context';
+import { userSummarySelect } from '../users/public-user.select';
+
+const details = { user: { select: userSummarySelect }, material: true } as const;
 import { UpdateAnalyticsEventDto } from './dto/update-analytics-event.dto';
 
 @Injectable()
 export class AnalyticsEventsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  create(createAnalyticsEventDto: CreateAnalyticsEventDto) {
+  create(createAnalyticsEventDto: CreateAnalyticsEventDto, auth: AuthContext) {
+    // From the app an event always belongs to the signed-in user.
+    const dto = auth.isAdmin ? createAnalyticsEventDto : { ...createAnalyticsEventDto, userId: auth.userId };
     return this.prisma.analyticsEvent.create({
-      data: this.toCreateData(createAnalyticsEventDto),
-      include: { user: true, material: true },
+      data: this.toCreateData(dto),
+      include: details,
     });
   }
 
   findAll() {
     return this.prisma.analyticsEvent.findMany({
-      include: { user: true, material: true },
+      include: details,
       orderBy: { occurredAt: 'desc' },
     });
   }
@@ -25,7 +31,7 @@ export class AnalyticsEventsService {
   async findOne(id: string) {
     const event = await this.prisma.analyticsEvent.findUnique({
       where: { id },
-      include: { user: true, material: true },
+      include: details,
     });
     if (!event) throw new NotFoundException(`Analytics event ${id} not found`);
     return event;
@@ -36,7 +42,7 @@ export class AnalyticsEventsService {
     return this.prisma.analyticsEvent.update({
       where: { id },
       data: this.toUpdateData(updateAnalyticsEventDto),
-      include: { user: true, material: true },
+      include: details,
     });
   }
 

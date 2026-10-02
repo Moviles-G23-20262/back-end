@@ -15,6 +15,7 @@ describe('RatingsService', () => {
     $transaction: jest.fn(),
   };
 
+  const admin = { isAdmin: true };
   const buyer = '22222222-2222-4222-8222-222222222222';
   const seller = '33333333-3333-4333-8333-333333333333';
   const base = {
@@ -34,19 +35,19 @@ describe('RatingsService', () => {
   });
 
   it('rejects rating yourself', async () => {
-    await expect(service.create({ ...base, ratedId: buyer })).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.create({ ...base, ratedId: buyer }, admin)).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('rejects users that are not part of the exchange', async () => {
     prisma.exchange.findUnique.mockResolvedValue({ buyerId: buyer, sellerId: seller });
     const outsider = '44444444-4444-4444-8444-444444444444';
-    await expect(service.create({ ...base, raterId: outsider })).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.create({ ...base, raterId: outsider }, admin)).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('rejects a second rating for the same exchange', async () => {
     prisma.exchange.findUnique.mockResolvedValue({ buyerId: buyer, sellerId: seller });
     prisma.rating.findUnique.mockResolvedValue({ id: 'existing' });
-    await expect(service.create(base)).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.create(base, admin)).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('creates the rating and updates the rated user average', async () => {
@@ -55,9 +56,21 @@ describe('RatingsService', () => {
     tx.rating.create.mockResolvedValue({ id: 'r1', ...base, tags: [] });
     tx.rating.aggregate.mockResolvedValue({ _avg: { stars: 4.5 } });
 
-    await service.create(base);
+    await service.create(base, admin);
 
     expect(tx.rating.create).toHaveBeenCalledWith({ data: { ...base, tags: [] } });
     expect(tx.user.update).toHaveBeenCalledWith({ where: { id: seller }, data: { rating: 4.5 } });
+  });
+
+  it('rates as the signed-in user, ignoring the raterId sent in the body', async () => {
+    const outsider = '44444444-4444-4444-8444-444444444444';
+    prisma.exchange.findUnique.mockResolvedValue({ buyerId: buyer, sellerId: seller });
+    prisma.rating.findUnique.mockResolvedValue(null);
+    tx.rating.create.mockResolvedValue({ id: 'r1' });
+    tx.rating.aggregate.mockResolvedValue({ _avg: { stars: 5 } });
+
+    await service.create({ ...base, raterId: outsider }, { isAdmin: false, userId: buyer });
+
+    expect(tx.rating.create).toHaveBeenCalledWith({ data: { ...base, raterId: buyer, tags: [] } });
   });
 });
