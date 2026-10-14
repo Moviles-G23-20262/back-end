@@ -35,6 +35,7 @@ model User {
 
   meetingProposals MeetingProposal[]
   scheduleBlocks   ScheduleBlock[]
+  smartAlerts      SmartAlert[]
 }
 
 model Material {
@@ -221,6 +222,26 @@ model Notification {
   @@index([sentAt])
 }
 
+/// A saved search. Publishing a listing that matches it sends the owner a SMART_MATCH notification.
+model SmartAlert {
+  id           String             @id @default(uuid()) @db.Uuid
+  userId       String             @db.Uuid
+  /// Matched against the listing title and course code; empty matches everything.
+  keyword      String             @default("")
+  courseCode   String?
+  category     MaterialCategory?
+  maxPrice     Decimal            @db.Decimal(10, 2)
+  /// Worst condition accepted: GOOD also takes NEW and LIKE_NEW.
+  minCondition MaterialCondition?
+  enabled      Boolean            @default(true)
+  createdAt    DateTime           @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([enabled])
+}
+
 model AnalyticsEvent {
   id         String             @id @default(uuid()) @db.Uuid
   userId     String?            @db.Uuid
@@ -320,4 +341,5 @@ enum AnalyticsEventType {
   SMART_MATCH_OPENED
   SMART_MATCH_RESERVED
   EXCHANGE_CONFIRMED
+  MEETING_CONFIRMED
 }

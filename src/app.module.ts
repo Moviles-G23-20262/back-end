@@ -17,6 +17,7 @@ import { RatingsModule } from './ratings/ratings.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { MeetingProposalsModule } from './meeting-proposals/meeting-proposals.module';
 import { ScheduleBlocksModule } from './schedule-blocks/schedule-blocks.module';
+import { SmartAlertsModule } from './smart-alerts/smart-alerts.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { ScheduleBlocksModule } from './schedule-blocks/schedule-blocks.module';
     UploadsModule,
     MeetingProposalsModule,
     ScheduleBlocksModule,
+    SmartAlertsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

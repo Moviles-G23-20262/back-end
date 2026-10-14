@@ -12,7 +12,7 @@ NestJS + Prisma API behind the Campus Swap mobile app (a peer-to-peer marketplac
 
 ## How it is organised
 
-One Nest module per entity under `src/`, each with `controller`, `service`, `dto/`, and specs next to the code: `auth`, `users`, `materials`, `chatrooms`, `messages`, `exchanges`, `meeting-points`, `meeting-proposals`, `schedule-blocks`, `wishlist-items`, `notifications`, `ratings`, `analytics-events`, `uploads`, `sql`. `PrismaModule` / `PrismaService` is the shared database client.
+One Nest module per entity under `src/`, each with `controller`, `service`, `dto/`, and specs next to the code: `auth`, `users`, `materials`, `chatrooms`, `messages`, `exchanges`, `meeting-points`, `meeting-proposals`, `schedule-blocks`, `wishlist-items`, `notifications`, `smart-alerts`, `ratings`, `analytics-events`, `uploads`, `sql`. `PrismaModule` / `PrismaService` is the shared database client.
 
 Conventions to follow when adding code:
 
@@ -57,7 +57,7 @@ The Django service mirrors this schema by hand with unmanaged models (`../analyt
 1. Say so to whoever owns the analytics back-end, or update `analytics/models.py` yourself in the same change.
 2. Prefer adding nullable columns over renaming or dropping, since the Django side reads by exact column name (`db_column`).
 
-Known drift at the time of writing: `MEETING_CONFIRMED` exists in Django's `AnalyticsEventType` but not in the Prisma enum (so this API rejects that event type), and Django has no models yet for `Rating`, `MeetingProposal` or `ScheduleBlock`.
+Known drift at the time of writing: Django has no models yet for `Rating`, `MeetingProposal` or `ScheduleBlock`.
 
 ## Testing
 

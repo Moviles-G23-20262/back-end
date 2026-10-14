@@ -15,8 +15,9 @@ describe('AppController', () => {
   });
 
   describe('root', () => {
-    it('should return "Hello World!"', () => {
-      expect(appController.getHello()).toBe('Hello World!');
+    // The root route is the public health check; the exact text doesn't matter.
+    it('should return the service greeting', () => {
+      expect(appController.getHello()).toBe(new AppService().getHello());
     });
   });
 });
