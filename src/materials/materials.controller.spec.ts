@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { MaterialsController } from './materials.controller';
 import { MaterialsService } from './materials.service';
 import { PrismaService } from '../prisma.service';
+import { SmartAlertsService } from '../smart-alerts/smart-alerts.service';
 
 describe('MaterialsController', () => {
   let controller: MaterialsController;
@@ -9,7 +10,7 @@ describe('MaterialsController', () => {
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [MaterialsController],
-      providers: [MaterialsService, { provide: PrismaService, useValue: {} }],
+      providers: [MaterialsService, { provide: PrismaService, useValue: {} }, { provide: SmartAlertsService, useValue: {} }],
     }).compile();
 
     controller = module.get<MaterialsController>(MaterialsController);

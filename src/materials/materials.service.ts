@@ -1,23 +1,34 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { CreateMaterialDto } from './dto/create-material.dto';
 import { UpdateMaterialDto } from './dto/update-material.dto';
 import { FindMaterialsQueryDto } from './dto/find-materials-query.dto';
 import { PrismaService } from '../prisma.service';
 import { actingUserId, type AuthContext } from '../auth/auth-context';
 import { userSummarySelect } from '../users/public-user.select';
+import { SmartAlertsService } from '../smart-alerts/smart-alerts.service';
 
 const withSeller = { seller: { select: userSummarySelect } } as const;
 
 @Injectable()
 export class MaterialsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(MaterialsService.name);
 
-  create(createMaterialDto: CreateMaterialDto, auth: AuthContext) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly smartAlerts: SmartAlertsService,
+  ) {}
+
+  async create(createMaterialDto: CreateMaterialDto, auth: AuthContext) {
     const sellerId = actingUserId(auth, createMaterialDto.sellerId, 'sellerId');
-    return this.prisma.material.create({
+    const material = await this.prisma.material.create({
       data: { ...createMaterialDto, sellerId },
       include: withSeller,
     });
+    // The listing is already published: a failure here must not turn into an error for the seller.
+    await this.smartAlerts.notifyMatches(material).catch((error: unknown) => {
+      this.logger.warn(`Smart match notifications failed for material ${material.id}: ${String(error)}`);
+    });
+    return material;
   }
 
   findAll({ sellerId }: FindMaterialsQueryDto) {
