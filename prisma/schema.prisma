@@ -50,6 +50,9 @@ model Material {
   model       String?
   imageUrls   String[]
   sellerId    String             @db.Uuid
+  // Made by the app for a listing it may have to send more than once (queued offline): a retry
+  // finds the material it already created instead of publishing a second one.
+  clientId    String?            @unique @db.Uuid
   chatRooms   ChatRoom[]
   seller      User               @relation(fields: [sellerId], references: [id])
 
