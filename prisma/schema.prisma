@@ -249,6 +249,10 @@ model AnalyticsEvent {
   eventType  AnalyticsEventType
   metadata   Json?
   occurredAt DateTime           @default(now())
+  // Set by the app for events queued offline: the UUID it made for the event (a retry cannot
+  // create a second row) and the moment the phone really created it.
+  clientId        String?  @unique @db.Uuid
+  clientCreatedAt DateTime?
 
   user     User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
   material Material? @relation(fields: [materialId], references: [id], onDelete: SetNull)

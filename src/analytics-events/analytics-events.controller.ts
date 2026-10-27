@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
 import { AnalyticsEventsService } from './analytics-events.service';
 import { CreateAnalyticsEventDto } from './dto/create-analytics-event.dto';
+import { BatchAnalyticsEventsDto } from './dto/batch-analytics-events.dto';
 import { UpdateAnalyticsEventDto } from './dto/update-analytics-event.dto';
 import { AdminOnly, Auth } from '../auth/auth.decorators';
 import type { AuthContext } from '../auth/auth-context';
@@ -12,6 +13,11 @@ export class AnalyticsEventsController {
   @Post()
   create(@Body() createAnalyticsEventDto: CreateAnalyticsEventDto, @Auth() auth: AuthContext) {
     return this.analyticsEventsService.create(createAnalyticsEventDto, auth);
+  }
+
+  @Post('batch')
+  createBatch(@Body() dto: BatchAnalyticsEventsDto, @Auth() auth: AuthContext) {
+    return this.analyticsEventsService.createBatch(dto.events, auth);
   }
 
   @AdminOnly()
