@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { UpdateMessageDto } from './dto/update-message.dto';
 import { FindMessagesQueryDto } from './dto/find-messages-query.dto';
@@ -26,11 +26,42 @@ export class MessagesService {
     this.assertParticipant(room, auth);
 
     const senderId = actingUserId(auth, createMessageDto.senderId, 'senderId');
-    return this.prisma.message.create({
-      // From the app a new message is never "read"; the other side marks it when they open the chat.
-      data: { chatRoomId, senderId, content, isRead: auth.isAdmin ? createMessageDto.isRead : false },
-      include: withSender,
-    });
+
+    let createdAt: Date | undefined;
+    if (createMessageDto.clientCreatedAt) {
+      const parsed = new Date(createMessageDto.clientCreatedAt);
+      const now = new Date();
+      const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      if (parsed <= now && parsed >= sevenDaysAgo) {
+        createdAt = parsed;
+      }
+    }
+
+    try {
+      return await this.prisma.message.create({
+        data: {
+          ...(createMessageDto.id ? { id: createMessageDto.id } : {}),
+          chatRoomId,
+          senderId,
+          content,
+          isRead: auth.isAdmin ? createMessageDto.isRead : false,
+          ...(createdAt ? { createdAt } : {}),
+        },
+        include: withSender,
+      });
+    } catch (error: any) {
+      if (error?.code === 'P2002' && createMessageDto.id) {
+        const existing = await this.prisma.message.findUnique({
+          where: { id: createMessageDto.id },
+          include: withSender,
+        });
+        if (existing && existing.senderId === senderId) {
+          return existing;
+        }
+        throw new ConflictException('Message already exists with different sender');
+      }
+      throw error;
+    }
   }
 
   findAll({ chatRoomId }: FindMessagesQueryDto, auth: AuthContext) {

@@ -10,9 +10,10 @@ describe('ExchangesService', () => {
     meetingProposal: { findFirst: jest.fn() },
     exchange: { create: jest.fn(), update: jest.fn() },
     notification: { create: jest.fn() },
+    analyticsEvent: { create: jest.fn() },
   };
   const prisma = {
-    exchange: { create: jest.fn(), findUnique: jest.fn() },
+    exchange: { create: jest.fn(), findUnique: jest.fn(), findMany: jest.fn() },
     material: { findUnique: jest.fn() },
     meetingPoint: { findUnique: jest.fn() },
     $transaction: jest.fn(),
@@ -177,6 +178,45 @@ describe('ExchangesService', () => {
       expect(tx.exchange.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: { status: 'CANCELLED', cancelledAt: expect.any(Date) } }),
       );
+    });
+  });
+
+  describe('BQ11: time-to-sell', () => {
+    it('creates EXCHANGE_CONFIRMED analytics event upon complete', async () => {
+      const pending = { id: exchangeId, materialId, buyerId, sellerId, price: '30000', status: 'PENDING', material: { category: 'BOOKS' } };
+      prisma.exchange.findUnique.mockResolvedValue(pending);
+
+      await service.complete(exchangeId, { receivedCondition: 'GOOD' }, asBuyer);
+
+      expect(tx.analyticsEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            eventType: 'EXCHANGE_CONFIRMED',
+            userId: buyerId,
+            materialId,
+          }),
+        }),
+      );
+    });
+
+    it('calculates time to sell metrics from completed exchanges', async () => {
+      const now = new Date('2026-10-15T12:00:00Z');
+      const listedBooks = new Date('2026-10-12T12:00:00Z'); // 3 days
+      const listedCalcs = new Date('2026-10-14T00:00:00Z'); // 1.5 days
+
+      prisma.exchange.findMany.mockResolvedValue([
+        { completedAt: now, material: { category: 'BOOKS', createdAt: listedBooks } },
+        { completedAt: now, material: { category: 'CALCULATORS', createdAt: listedCalcs } },
+      ]);
+
+      const result = await service.getTimeToSell();
+
+      expect(result.sold_listings).toBe(2);
+      expect(result.skipped).toBe(0);
+      expect(result.days_to_sell.mean).toBe(2.25);
+      expect(result.by_category).toHaveLength(2);
+      expect(result.by_category[0].category).toBe('CALCULATORS');
+      expect(result.by_category[0].mean_days).toBe(1.5);
     });
   });
 });

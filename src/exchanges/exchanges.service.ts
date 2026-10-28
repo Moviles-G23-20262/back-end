@@ -102,11 +102,29 @@ export class ExchangesService {
 
     return this.prisma.$transaction(async (tx) => {
       await tx.material.update({ where: { id: exchange.materialId }, data: { status: 'SOLD' } });
-      return tx.exchange.update({
+      const completed = await tx.exchange.update({
         where: { id },
         data: { status: 'COMPLETED', completedAt: new Date(), receivedCondition, ...(lat !== undefined && { lat, lng }) },
         include: details,
       });
+
+      // BQ11: record completed sale analytics event
+      await tx.analyticsEvent.create({
+        data: {
+          eventType: 'EXCHANGE_CONFIRMED',
+          userId: exchange.buyerId,
+          materialId: exchange.materialId,
+          occurredAt: completed.completedAt ?? new Date(),
+          metadata: {
+            exchangeId: id,
+            sellerId: exchange.sellerId,
+            price: exchange.price.toString(),
+            category: exchange.material?.category,
+          },
+        },
+      });
+
+      return completed;
     });
   }
 
@@ -209,5 +227,71 @@ export class ExchangesService {
   private async ensureExists(id: string) {
     const exists = await this.prisma.exchange.findUnique({ where: { id }, select: { id: true } });
     if (!exists) throw new NotFoundException(`Exchange ${id} not found`);
+  }
+
+  /**
+   * BQ11: What is the average time (in days) it takes for a newly listed academic item to be marked as sold?
+   */
+  async getTimeToSell() {
+    const exchanges = await this.prisma.exchange.findMany({
+      where: { status: 'COMPLETED', completedAt: { not: null } },
+      include: { material: { select: { category: true, createdAt: true } } },
+    });
+
+    const days: number[] = [];
+    const byCategory = new Map<string, number[]>();
+    let skipped = 0;
+
+    for (const e of exchanges) {
+      const listedAt = e.material?.createdAt;
+      const soldAt = e.completedAt;
+      if (!listedAt || !soldAt || soldAt < listedAt) {
+        skipped++;
+        continue;
+      }
+      const diffDays = (soldAt.getTime() - listedAt.getTime()) / (1000 * 60 * 60 * 24);
+      days.push(diffDays);
+      const cat = e.material.category;
+      if (!byCategory.has(cat)) byCategory.set(cat, []);
+      byCategory.get(cat)!.push(diffDays);
+    }
+
+    const buckets = [
+      { upper: 1, label: 'Under 1 day' },
+      { upper: 3, label: '1-3 days' },
+      { upper: 7, label: '3-7 days' },
+      { upper: 14, label: '1-2 weeks' },
+      { upper: 30, label: '2-4 weeks' },
+      { upper: null, label: '30+ days' },
+    ];
+
+    const histogram = buckets.map(({ upper, label }, idx) => {
+      const lower = idx === 0 ? 0 : buckets[idx - 1].upper!;
+      const count = days.filter((d) => d >= lower && (upper === null || d < upper)).length;
+      return { bucket: label, sold: count };
+    });
+
+    const sorted = [...days].sort((a, b) => a - b);
+    const mean = days.length ? Number((days.reduce((a, b) => a + b, 0) / days.length).toFixed(4)) : 0.0;
+    const median = days.length ? Number(sorted[Math.floor(days.length / 2)].toFixed(4)) : 0.0;
+    const p75 = days.length ? Number(sorted[Math.floor(days.length * 0.75)].toFixed(4)) : 0.0;
+    const min = days.length ? Number(sorted[0].toFixed(4)) : 0.0;
+    const max = days.length ? Number(sorted[sorted.length - 1].toFixed(4)) : 0.0;
+
+    const categories = Array.from(byCategory.entries()).map(([cat, values]) => {
+      const catSorted = [...values].sort((a, b) => a - b);
+      const catMean = Number((values.reduce((a, b) => a + b, 0) / values.length).toFixed(4));
+      const catMedian = Number(catSorted[Math.floor(values.length / 2)].toFixed(4));
+      return { category: cat, sold: values.length, mean_days: catMean, median_days: catMedian };
+    });
+    categories.sort((a, b) => a.median_days - b.median_days || a.category.localeCompare(b.category));
+
+    return {
+      sold_listings: days.length,
+      skipped,
+      days_to_sell: { mean, median, p75, min, max },
+      histogram,
+      by_category: categories,
+    };
   }
 }

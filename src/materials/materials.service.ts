@@ -20,17 +20,26 @@ export class MaterialsService {
   ) {}
 
   /**
-   * Publishes a listing. Idempotent when the request carries a `clientId`: a repeat of the same
+   * Publishes a listing. Idempotent when the request carries a `clientId` or `id`: a repeat of the same
    * listing (the app resends one it saved offline, or a response was lost) returns the material
    * that already exists, with no second row and no second round of smart-match notifications.
    */
   async create(createMaterialDto: CreateMaterialDto, auth: AuthContext) {
     const sellerId = actingUserId(auth, createMaterialDto.sellerId, 'sellerId');
-    const { clientId } = createMaterialDto;
+    const { clientId, id } = createMaterialDto;
 
     if (clientId) {
       const existing = await this.findByClientId(clientId, sellerId);
       if (existing) return existing;
+    } else if (id) {
+      const existing = await this.prisma.material.findUnique({
+        where: { id },
+        include: withSeller,
+      });
+      if (existing) {
+        if (existing.sellerId === sellerId) return existing;
+        throw new ConflictException('Material already exists with different seller');
+      }
     }
 
     let material: Prisma.MaterialGetPayload<{ include: typeof withSeller }>;
@@ -39,15 +48,31 @@ export class MaterialsService {
         data: { ...createMaterialDto, sellerId },
         include: withSeller,
       });
-    } catch (error) {
+    } catch (error: any) {
       // Two retries of the same listing arrived together and both passed the check above: the
       // unique index let one in, and this one returns what that one created.
-      if (clientId && error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        const existing = await this.findByClientId(clientId, sellerId);
-        if (existing) return existing;
+      if (
+        (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') ||
+        error?.code === 'P2002'
+      ) {
+        if (clientId) {
+          const existing = await this.findByClientId(clientId, sellerId);
+          if (existing) return existing;
+        }
+        if (id) {
+          const existing = await this.prisma.material.findUnique({
+            where: { id },
+            include: withSeller,
+          });
+          if (existing) {
+            if (existing.sellerId === sellerId) return existing;
+            throw new ConflictException('Material already exists with different seller');
+          }
+        }
       }
       throw error;
     }
+
     // The listing is already published: a failure here must not turn into an error for the seller.
     await this.smartAlerts.notifyMatches(material).catch((error: unknown) => {
       this.logger.warn(`Smart match notifications failed for material ${material.id}: ${String(error)}`);

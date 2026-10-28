@@ -9,6 +9,7 @@ describe('MeetingProposalsService', () => {
     meetingProposal: { updateMany: jest.fn(), create: jest.fn(), update: jest.fn() },
     message: { create: jest.fn() },
     exchange: { updateMany: jest.fn() },
+    analyticsEvent: { create: jest.fn() },
   };
   const prisma = {
     chatRoom: { findUnique: jest.fn() },

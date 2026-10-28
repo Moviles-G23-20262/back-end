@@ -5,7 +5,7 @@ import { PlaceOrderDto } from './dto/place-order.dto';
 import { CompleteExchangeDto } from './dto/complete-exchange.dto';
 import { FindExchangesQueryDto } from './dto/find-exchanges-query.dto';
 import { ExchangesService } from './exchanges.service';
-import { AdminOnly, Auth } from '../auth/auth.decorators';
+import { AdminOnly, Auth, Public } from '../auth/auth.decorators';
 import type { AuthContext } from '../auth/auth-context';
 
 @Controller('exchanges')
@@ -28,6 +28,13 @@ export class ExchangesController {
   @Get()
   findAll(@Query() query: FindExchangesQueryDto, @Auth() auth: AuthContext) {
     return this.exchangesService.findAll(query, auth);
+  }
+
+  /** BQ11: average time in days for academic items to be marked as sold */
+  @Public()
+  @Get('time-to-sell')
+  getTimeToSell() {
+    return this.exchangesService.getTimeToSell();
   }
 
   @Get(':id')

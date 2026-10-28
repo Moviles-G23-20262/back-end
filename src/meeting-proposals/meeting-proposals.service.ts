@@ -128,6 +128,19 @@ export class MeetingProposalsService {
           content: `Confirmed! See you at ${accepted.meetingPoint.name} on ${formatCampusDate(accepted.startsAt)} at ${formatCampusTime(accepted.startsAt)}.`,
         },
       });
+      // BQ4 Analytics: record the moment buyer and seller agree on a meeting point.
+      await tx.analyticsEvent.create({
+        data: {
+          eventType: 'MEETING_CONFIRMED',
+          userId,
+          materialId: room.materialId,
+          metadata: {
+            chatRoomId: room.id,
+            meetingProposalId: accepted.id,
+            meetingPointId: accepted.meetingPointId,
+          },
+        },
+      });
       return accepted;
     });
   }

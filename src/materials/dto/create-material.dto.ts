@@ -2,6 +2,10 @@ import { IsArray, IsEnum, IsOptional, IsString, IsUUID, Matches, MinLength } fro
 import { MaterialCategory, MaterialCondition, MaterialStatus } from '../../generated/prisma/client';
 
 export class CreateMaterialDto {
+  @IsOptional()
+  @IsUUID()
+  id?: string;
+
   @IsString()
   @MinLength(2)
   title!: string;
