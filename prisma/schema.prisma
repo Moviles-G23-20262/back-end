@@ -50,6 +50,9 @@ model Material {
   model       String?
   imageUrls   String[]
   sellerId    String             @db.Uuid
+  // Made by the app for a listing it may have to send more than once (queued offline): a retry
+  // finds the material it already created instead of publishing a second one.
+  clientId    String?            @unique @db.Uuid
   chatRooms   ChatRoom[]
   seller      User               @relation(fields: [sellerId], references: [id])
 
@@ -249,6 +252,10 @@ model AnalyticsEvent {
   eventType  AnalyticsEventType
   metadata   Json?
   occurredAt DateTime           @default(now())
+  // Set by the app for events queued offline: the UUID it made for the event (a retry cannot
+  // create a second row) and the moment the phone really created it.
+  clientId        String?  @unique @db.Uuid
+  clientCreatedAt DateTime?
 
   user     User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
   material Material? @relation(fields: [materialId], references: [id], onDelete: SetNull)

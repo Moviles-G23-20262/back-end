@@ -42,6 +42,12 @@ export class CreateMaterialDto {
   @IsUUID()
   sellerId?: string;
 
+  // UUID the app made for this listing. Sending the same one again returns the material that was
+  // already created instead of a duplicate (a listing saved offline may be sent more than once).
+  @IsOptional()
+  @IsUUID()
+  clientId?: string;
+
   @IsEnum(MaterialCategory)
   category!: MaterialCategory;
 }
