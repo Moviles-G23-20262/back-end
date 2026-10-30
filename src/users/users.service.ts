@@ -41,11 +41,37 @@ export class UsersService {
     return user;
   }
 
+  // Internal use (auth): the signed-in user's own full profile.
+  async findSelf(id: string) {
+    const user = await this.prisma.user.findUnique({ where: { id }, select: publicUserSelect });
+    if (!user) throw new NotFoundException(`User ${id} not found`);
+    return user;
+  }
+
   // Internal use (auth): the only method that returns passwordHash. Never expose it from a controller.
   findByEmailWithHash(email: string) {
     return this.prisma.user.findFirst({
       where: { email: { equals: email, mode: 'insensitive' } },
       select: { ...publicUserSelect, passwordHash: true },
+    });
+  }
+
+  // Internal use (auth): the caller already proved they own the email with a code we sent to it.
+  async resetPassword(id: string, password: string) {
+    const user = await this.prisma.user.update({
+      where: { id },
+      data: { passwordHash: await hash(password, BCRYPT_ROUNDS) },
+      select: publicUserSelect,
+    });
+    return user.emailVerifiedAt ? user : this.markEmailVerified(id);
+  }
+
+  // Internal use (auth).
+  markEmailVerified(id: string) {
+    return this.prisma.user.update({
+      where: { id },
+      data: { emailVerifiedAt: new Date() },
+      select: publicUserSelect,
     });
   }
 
