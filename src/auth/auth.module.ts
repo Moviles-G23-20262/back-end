@@ -5,10 +5,13 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { AuthGuard } from './auth.guard';
 import { UsersModule } from '../users/users.module';
+import { MailModule } from '../mail/mail.module';
+import { EmailCodesService } from './email-codes.service';
 
 @Module({
   imports: [
     UsersModule,
+    MailModule,
     // Async so process.env is read at bootstrap, after dotenv has loaded (main.ts imports it after AppModule).
     JwtModule.registerAsync({
       useFactory: () => {
@@ -22,6 +25,6 @@ import { UsersModule } from '../users/users.module';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, { provide: APP_GUARD, useClass: AuthGuard }],
+  providers: [AuthService, EmailCodesService, { provide: APP_GUARD, useClass: AuthGuard }],
 })
 export class AuthModule {}

@@ -7,6 +7,7 @@ export const publicUserSelect = {
   faculty: true,
   rating: true,
   createdAt: true,
+  emailVerifiedAt: true,
 } as const;
 
 /**

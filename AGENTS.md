@@ -7,7 +7,7 @@ NestJS + Prisma API behind the Campus Swap mobile app (a peer-to-peer marketplac
 - NestJS 11, TypeScript, Prisma 7 with the `@prisma/adapter-pg` driver adapter, PostgreSQL, `class-validator` DTOs, JWT auth, Swagger at `/api`.
 - `npm run start:dev` runs the API (port `PORT`, default 3000). `npm test` runs unit and HTTP specs, `npm run test:e2e` the e2e suite, `npm run lint` runs ESLint with `--fix`.
 - `postinstall` runs `prisma generate`. The client is generated into `src/generated/prisma` (git-ignored output, import from `../generated/prisma/client`).
-- Environment variables (in `.env`, never commit it): `DATABASE_URL`, `JWT_SECRET` (the app refuses to start without it), `JWT_EXPIRES_IN` (default `7d`), `ADMIN_API_KEY`, `BLOB_READ_WRITE_TOKEN` (image uploads to Vercel Blob), `PORT`.
+- Environment variables (in `.env`, never commit it): `DATABASE_URL`, `JWT_SECRET` (the app refuses to start without it), `JWT_EXPIRES_IN` (default `7d`), `ADMIN_API_KEY`, `BLOB_READ_WRITE_TOKEN` (image uploads to Vercel Blob), `PORT`, and for email `SMTP_USER` / `SMTP_PASS` (a Gmail address and its Google app password; optional `SMTP_HOST`, `SMTP_PORT`, `MAIL_FROM`). Without SMTP credentials, emails are printed to the console outside production.
 - Schema changes: edit `prisma/schema.prisma`, then `npx prisma migrate dev --name <what_changed>`. Migrations live in `prisma/migrations`. Always tell the analytics team (see "Schema changes affect Django" below).
 
 ## How it is organised
@@ -27,6 +27,8 @@ Conventions to follow when adding code:
 
 1. A **user JWT** (`Authorization: Bearer <token>`), issued by `POST /auth/register` or `POST /auth/login`. The payload carries `sub` (user id) and `email`.
 2. The **admin key** (`X-Admin-Key: <ADMIN_API_KEY>`), used by the developer dashboard (`../back-end-dashboard`). It is compared in constant time and gives `isAdmin: true` with no `userId`.
+
+**Email codes.** `POST /auth/forgot-password` emails a 6-digit code (always 204, so it doesn't reveal which emails exist) and `POST /auth/reset-password` takes email, code and new password, then returns `{ user, accessToken }` like login. Register emails a verification code; a signed-in user asks for another with `POST /auth/verify-email/send` and confirms with `POST /auth/verify-email`, which sets `User.emailVerifiedAt`. Unverified users can still log in. Codes live in `EmailCode` (bcrypt hash, one per user and purpose, 15 minutes, 5 attempts, one new code per minute); see `src/auth/email-codes.service.ts` and `src/mail/mail.service.ts`.
 
 Decorators in `auth.decorators.ts`: `@Public()` (register, login, health check) and `@AdminOnly()` (list-everything and mutate-anything routes, and the whole `/sql` controller). Anything not marked is available to any signed-in user, scoped to their own data.
 
