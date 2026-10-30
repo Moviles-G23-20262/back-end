@@ -18,6 +18,8 @@ model User {
   faculty         String?
   rating          Float      @default(0)
   createdAt       DateTime   @default(now())
+  // Set once the user types the code we emailed them (or resets their password, which proves the same).
+  emailVerifiedAt DateTime?
   buyerChatRooms  ChatRoom[] @relation("ChatRoomBuyer")
   sellerChatRooms ChatRoom[] @relation("ChatRoomSeller")
   materials       Material[]
@@ -36,6 +38,7 @@ model User {
   meetingProposals MeetingProposal[]
   scheduleBlocks   ScheduleBlock[]
   smartAlerts      SmartAlert[]
+  emailCodes       EmailCode[]
 }
 
 model Material {
@@ -245,6 +248,20 @@ model SmartAlert {
   @@index([enabled])
 }
 
+/// A one-time 6-digit code sent by email. Only its bcrypt hash is stored, and a user has at most one per purpose.
+model EmailCode {
+  id        String           @id @default(uuid()) @db.Uuid
+  userId    String           @db.Uuid
+  purpose   EmailCodePurpose
+  codeHash  String
+  attempts  Int              @default(0)
+  expiresAt DateTime
+  createdAt DateTime         @default(now())
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, purpose])
+}
+
 model AnalyticsEvent {
   id         String             @id @default(uuid()) @db.Uuid
   userId     String?            @db.Uuid
@@ -349,4 +366,9 @@ enum AnalyticsEventType {
   SMART_MATCH_RESERVED
   EXCHANGE_CONFIRMED
   MEETING_CONFIRMED
+}
+
+enum EmailCodePurpose {
+  VERIFY_EMAIL
+  RESET_PASSWORD
 }
