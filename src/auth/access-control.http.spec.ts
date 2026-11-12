@@ -97,9 +97,10 @@ describe('Access control (HTTP)', () => {
     await asMe(request(server()).post('/materials'))
       .send({
         title: 'Calculator',
-        description: 'Works',
-        price: '18.00',
-        imageUrls: [],
+        description: 'Works like new',
+        price: '18000.00',
+        condition: 'GOOD',
+        imageUrls: ['https://blob.test/calculator.jpg'],
         category: 'CALCULATORS',
         sellerId: OTHER,
       })

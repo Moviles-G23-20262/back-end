@@ -33,9 +33,22 @@ export class ExchangesService {
     await this.validateLocation(createExchangeDto);
 
     const status = createExchangeDto.status ?? 'COMPLETED';
-    return this.prisma.exchange.create({
-      data: { ...createExchangeDto, status, ...this.statusDates(status) },
-      include: details,
+    const data = { ...createExchangeDto, status, ...this.statusDates(status) };
+    if (status !== 'COMPLETED') return this.prisma.exchange.create({ data, include: details });
+
+    // A finished sale sells the listing, and a listing is sold once: a second sale of the same item
+    // would count twice in the average ticket.
+    return this.prisma.$transaction(async (tx) => {
+      const material = await tx.material.findUnique({
+        where: { id: createExchangeDto.materialId },
+        select: { status: true },
+      });
+      if (!material) throw new NotFoundException(`Material ${createExchangeDto.materialId} not found`);
+      if (material.status === 'SOLD') throw new ConflictException('This listing is already sold');
+
+      const exchange = await tx.exchange.create({ data, include: details });
+      await tx.material.update({ where: { id: createExchangeDto.materialId }, data: { status: 'SOLD' } });
+      return exchange;
     });
   }
 
@@ -99,9 +112,19 @@ export class ExchangesService {
     const exchange = await this.findOne(id, auth);
     if (exchange.buyerId !== userId) throw new ForbiddenException('Only the buyer can complete the exchange');
     this.assertPending(exchange.status);
+    // Only a real sale counts for the average ticket: it needs a price and the listing still held for it.
+    if (!(Number(exchange.price) > 0)) throw new BadRequestException('An exchange without a price cannot be completed');
+    if (exchange.material.status !== 'RESERVED') {
+      throw new ConflictException('This listing is no longer reserved for this exchange');
+    }
 
     return this.prisma.$transaction(async (tx) => {
-      await tx.material.update({ where: { id: exchange.materialId }, data: { status: 'SOLD' } });
+      // Conditional update: if the listing changed since the check above, nothing is sold twice.
+      const { count } = await tx.material.updateMany({
+        where: { id: exchange.materialId, status: 'RESERVED' },
+        data: { status: 'SOLD' },
+      });
+      if (count === 0) throw new ConflictException('This listing is no longer reserved for this exchange');
       return tx.exchange.update({
         where: { id },
         data: { status: 'COMPLETED', completedAt: new Date(), receivedCondition, ...(lat !== undefined && { lat, lng }) },

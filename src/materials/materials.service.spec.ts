@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Prisma } from '../generated/prisma/client';
 import { MaterialsService } from './materials.service';
@@ -7,11 +7,21 @@ import { SmartAlertsService } from '../smart-alerts/smart-alerts.service';
 
 describe('MaterialsService', () => {
   let service: MaterialsService;
-  const prisma = { material: { create: jest.fn(), findUnique: jest.fn(), update: jest.fn() } };
+  const prisma = {
+    material: { create: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
+    exchange: { count: jest.fn() },
+  };
   const smartAlerts = { notifyMatches: jest.fn() };
 
   const sellerId = '33333333-3333-4333-8333-333333333333';
-  const dto = { title: 'Arduino UNO', description: 'Barely used', price: '45000', imageUrls: [], category: 'LAB_EQUIPMENT' as const };
+  const dto = {
+    title: 'Arduino UNO',
+    description: 'Barely used, with its cable',
+    price: '45000',
+    condition: 'GOOD' as const,
+    imageUrls: ['https://blob.test/arduino.jpg'],
+    category: 'LAB_EQUIPMENT' as const,
+  };
   const created = { id: '11111111-1111-4111-8111-111111111111', sellerId, ...dto };
 
   beforeEach(async () => {
@@ -103,12 +113,61 @@ describe('MaterialsService', () => {
     });
 
     it('the clientId cannot be changed afterwards', async () => {
-      prisma.material.findUnique.mockResolvedValue({ ...created, sellerId });
+      prisma.material.findUnique.mockResolvedValue({ ...created, sellerId, status: 'AVAILABLE' });
+      prisma.exchange.count.mockResolvedValue(0);
       prisma.material.update.mockResolvedValue(created);
 
       await service.update(created.id, { title: 'New title', clientId }, asSeller);
 
       expect((prisma.material.update.mock.calls[0] as [{ data: unknown }])[0].data).toEqual({ title: 'New title' });
+    });
+  });
+
+  describe('editing a listing', () => {
+    const asSeller = { isAdmin: false, userId: sellerId };
+    const listing = (status: string) => ({ sellerId, status });
+
+    beforeEach(() => {
+      prisma.exchange.count.mockResolvedValue(0);
+      prisma.material.update.mockResolvedValue(created);
+    });
+
+    it('the seller can change the price of a listing that is on the market', async () => {
+      prisma.material.findUnique.mockResolvedValue(listing('AVAILABLE'));
+
+      await service.update(created.id, { price: '40000' }, asSeller);
+
+      expect(prisma.material.update).toHaveBeenCalled();
+    });
+
+    it('the seller cannot set the status by hand', async () => {
+      prisma.material.findUnique.mockResolvedValue(listing('AVAILABLE'));
+
+      await expect(service.update(created.id, { status: 'SOLD' }, asSeller)).rejects.toThrow(ForbiddenException);
+      expect(prisma.material.update).not.toHaveBeenCalled();
+    });
+
+    it.each(['RESERVED', 'SOLD'])('a %s listing cannot be edited by its seller', async (status) => {
+      prisma.material.findUnique.mockResolvedValue(listing(status));
+
+      await expect(service.update(created.id, { price: '40000' }, asSeller)).rejects.toThrow(ConflictException);
+      expect(prisma.material.update).not.toHaveBeenCalled();
+    });
+
+    it('a listing with a pending order cannot be edited, even if it still shows as available', async () => {
+      prisma.material.findUnique.mockResolvedValue(listing('AVAILABLE'));
+      prisma.exchange.count.mockResolvedValue(1);
+
+      await expect(service.update(created.id, { title: 'Another title' }, asSeller)).rejects.toThrow(ConflictException);
+    });
+
+    it('an admin can still correct a listing in any status', async () => {
+      prisma.material.findUnique.mockResolvedValue(listing('SOLD'));
+
+      await service.update(created.id, { status: 'AVAILABLE' }, { isAdmin: true });
+
+      expect(prisma.material.update).toHaveBeenCalled();
+      expect(prisma.exchange.count).not.toHaveBeenCalled();
     });
   });
 });
