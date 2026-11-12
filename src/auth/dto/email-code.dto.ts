@@ -1,5 +1,6 @@
 import { Transform } from 'class-transformer';
-import { IsEmail, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { IsEmail, Matches } from 'class-validator';
+import { StrongPassword } from '../../common/validation';
 
 const normaliseEmail = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim().toLowerCase() : value;
@@ -21,9 +22,7 @@ export class ResetPasswordDto {
   code!: string;
 
   // Same rules as the password chosen at registration.
-  @IsString()
-  @MinLength(8)
-  @MaxLength(72)
+  @StrongPassword()
   newPassword!: string;
 }
 

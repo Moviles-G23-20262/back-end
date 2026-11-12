@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ExchangesService } from './exchanges.service';
 import { PrismaService } from '../prisma.service';
@@ -6,7 +6,7 @@ import { PrismaService } from '../prisma.service';
 describe('ExchangesService', () => {
   let service: ExchangesService;
   const tx = {
-    material: { updateMany: jest.fn(), update: jest.fn() },
+    material: { updateMany: jest.fn(), update: jest.fn(), findUnique: jest.fn() },
     meetingProposal: { findFirst: jest.fn() },
     exchange: { create: jest.fn(), update: jest.fn() },
     notification: { create: jest.fn() },
@@ -38,17 +38,39 @@ describe('ExchangesService', () => {
   });
 
   describe('admin create', () => {
-    it('records a completed exchange with meeting point and coordinates', async () => {
+    it('records a completed exchange with meeting point and coordinates, and the listing is sold', async () => {
       prisma.meetingPoint.findUnique.mockResolvedValue({ id: meetingPointId });
+      tx.material.findUnique.mockResolvedValue({ status: 'AVAILABLE' });
       const dto = { ...base, meetingPointId, lat: 4.6, lng: -74.06 };
 
       await service.create(dto);
 
-      expect(prisma.exchange.create).toHaveBeenCalledWith(
+      expect(tx.exchange.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ ...dto, status: 'COMPLETED', completedAt: expect.any(Date) }),
         }),
       );
+      expect(tx.material.update).toHaveBeenCalledWith({ where: { id: materialId }, data: { status: 'SOLD' } });
+    });
+
+    it('does not record a second sale of a listing that is already sold', async () => {
+      tx.material.findUnique.mockResolvedValue({ status: 'SOLD' });
+
+      await expect(service.create(base)).rejects.toThrow(ConflictException);
+      expect(tx.exchange.create).not.toHaveBeenCalled();
+    });
+
+    it('does not record a sale of a listing that does not exist', async () => {
+      tx.material.findUnique.mockResolvedValue(null);
+
+      await expect(service.create(base)).rejects.toThrow(NotFoundException);
+    });
+
+    it('a pending exchange does not sell the listing', async () => {
+      await service.create({ ...base, status: 'PENDING' });
+
+      expect(prisma.exchange.create).toHaveBeenCalled();
+      expect(tx.material.update).not.toHaveBeenCalled();
     });
 
     it('rejects a latitude without longitude', async () => {
@@ -121,14 +143,27 @@ describe('ExchangesService', () => {
   });
 
   describe('complete and cancel', () => {
-    const pending = { id: exchangeId, materialId, buyerId, sellerId, status: 'PENDING' };
+    const pending = {
+      id: exchangeId,
+      materialId,
+      buyerId,
+      sellerId,
+      status: 'PENDING',
+      price: '25000.00',
+      material: { status: 'RESERVED' },
+    };
+
+    beforeEach(() => tx.material.updateMany.mockResolvedValue({ count: 1 }));
 
     it('lets the buyer complete: the listing is sold', async () => {
       prisma.exchange.findUnique.mockResolvedValue(pending);
 
       await service.complete(exchangeId, { receivedCondition: 'LIKE_NEW' }, asBuyer);
 
-      expect(tx.material.update).toHaveBeenCalledWith({ where: { id: materialId }, data: { status: 'SOLD' } });
+      expect(tx.material.updateMany).toHaveBeenCalledWith({
+        where: { id: materialId, status: 'RESERVED' },
+        data: { status: 'SOLD' },
+      });
       expect(tx.exchange.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: { status: 'COMPLETED', completedAt: expect.any(Date), receivedCondition: 'LIKE_NEW' },
@@ -157,6 +192,28 @@ describe('ExchangesService', () => {
       prisma.exchange.findUnique.mockResolvedValue(pending);
 
       await expect(service.complete(exchangeId, {}, asSeller)).rejects.toThrow(ForbiddenException);
+    });
+
+    it('does not complete an exchange without a price', async () => {
+      prisma.exchange.findUnique.mockResolvedValue({ ...pending, price: '0.00' });
+
+      await expect(service.complete(exchangeId, {}, asBuyer)).rejects.toThrow(BadRequestException);
+      expect(tx.exchange.update).not.toHaveBeenCalled();
+    });
+
+    it.each(['AVAILABLE', 'SOLD'])('does not complete when the listing is %s instead of reserved', async (status) => {
+      prisma.exchange.findUnique.mockResolvedValue({ ...pending, material: { status } });
+
+      await expect(service.complete(exchangeId, {}, asBuyer)).rejects.toThrow(ConflictException);
+      expect(tx.exchange.update).not.toHaveBeenCalled();
+    });
+
+    it('does not complete when the listing stopped being reserved while completing', async () => {
+      prisma.exchange.findUnique.mockResolvedValue(pending);
+      tx.material.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.complete(exchangeId, {}, asBuyer)).rejects.toThrow(ConflictException);
+      expect(tx.exchange.update).not.toHaveBeenCalled();
     });
 
     it('does not complete twice', async () => {

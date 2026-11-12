@@ -77,12 +77,16 @@ export class UsersService {
 
   async update(id: string, { password, ...data }: UpdateUserDto, auth: AuthContext) {
     assertSelfOrAdmin(auth, id);
-    await this.ensureExists(id);
+    const current = await this.prisma.user.findUnique({ where: { id }, select: { email: true } });
+    if (!current) throw new NotFoundException(`User ${id} not found`);
+    // A new address has not been verified yet, whatever was verified before.
+    const emailChanged = data.email !== undefined && data.email !== current.email;
     try {
       return await this.prisma.user.update({
         where: { id },
         data: {
           ...data,
+          ...(emailChanged && { emailVerifiedAt: null }),
           ...(password !== undefined && { passwordHash: await hash(password, BCRYPT_ROUNDS) }),
         },
         select: publicUserSelect,

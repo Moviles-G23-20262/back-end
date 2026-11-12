@@ -1,5 +1,5 @@
 import { ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { Prisma } from '../generated/prisma/client';
+import { Prisma, type MaterialStatus } from '../generated/prisma/client';
 import { CreateMaterialDto } from './dto/create-material.dto';
 import { UpdateMaterialDto } from './dto/update-material.dto';
 import { FindMaterialsQueryDto } from './dto/find-materials-query.dto';
@@ -82,10 +82,11 @@ export class MaterialsService {
   }
 
   async update(id: string, updateMaterialDto: UpdateMaterialDto, auth: AuthContext) {
-    await this.ensureCanModify(id, auth);
+    const material = await this.ensureCanModify(id, auth);
     // Ownership can't be transferred through the app, and clientId only identifies the first publish.
     const { sellerId, ...changes } = updateMaterialDto;
     delete changes.clientId;
+    if (!auth.isAdmin) await this.assertSellerCanEdit(id, material.status, changes);
     return this.prisma.material.update({
       where: { id },
       data: auth.isAdmin ? { ...changes, sellerId } : changes,
@@ -101,11 +102,27 @@ export class MaterialsService {
   private async ensureCanModify(id: string, auth: AuthContext) {
     const material = await this.prisma.material.findUnique({
       where: { id },
-      select: { sellerId: true },
+      select: { sellerId: true, status: true },
     });
     if (!material) throw new NotFoundException(`Material ${id} not found`);
     if (!auth.isAdmin && material.sellerId !== auth.userId) {
       throw new ForbiddenException('Only the seller can change this listing');
+    }
+    return material;
+  }
+
+  /**
+   * The status of a listing follows its orders (ordered, completed, cancelled), never the seller's hand,
+   * and a listing that is reserved, sold or has a pending order is frozen: changing its price or
+   * putting it back on the market could sell the same item twice and count it twice in BQ15.
+   */
+  private async assertSellerCanEdit(id: string, status: MaterialStatus, changes: Pick<UpdateMaterialDto, 'status'>) {
+    if (changes.status !== undefined) {
+      throw new ForbiddenException('The status of a listing changes with its orders, it cannot be set by hand');
+    }
+    const pendingOrders = await this.prisma.exchange.count({ where: { materialId: id, status: 'PENDING' } });
+    if (status !== 'AVAILABLE' || pendingOrders > 0) {
+      throw new ConflictException('This listing is reserved or sold, or has a pending order, so it cannot be edited');
     }
   }
 }

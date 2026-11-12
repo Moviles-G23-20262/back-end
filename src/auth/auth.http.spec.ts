@@ -74,18 +74,45 @@ describe('Auth (HTTP)', () => {
   it('registers, hashing the plain password before it is stored', async () => {
     const res = await request(app.getHttpServer())
       .post('/auth/register')
-      .send({ email: ' ADA@uni.edu ', password: 'correct-horse', fullName: 'Ada', major: 'CS' })
+      .send({
+        email: ' ADA@Uniandes.edu.co ',
+        password: 'CampusSwap1!',
+        fullName: '  Ada   Lovelace ',
+        major: ' Computer   Science ',
+      })
       .expect(201);
 
     expect(res.body.accessToken).toEqual(expect.any(String));
     const { data } = prisma.user.create.mock.calls[0][0];
-    expect(data.email).toBe('ada@uni.edu');
+    expect(data.email).toBe('ada@uniandes.edu.co');
+    expect(data.fullName).toBe('Ada Lovelace');
+    expect(data.major).toBe('Computer Science');
     expect(data.password).toBeUndefined();
     expect(data.passwordHash).toMatch(/^\$2[aby]\$/);
-    expect(data.passwordHash).not.toContain('correct-horse');
+    expect(data.passwordHash).not.toContain('CampusSwap1!');
   });
 
-  it('logs in and the token opens /auth/me', async () => {
+  it('refuses a sign-up that breaks the rules, before anything is stored', async () => {
+    const server = app.getHttpServer();
+    prisma.user.create.mockClear();
+    const valid = { email: 'ada@uniandes.edu.co', password: 'CampusSwap1!', fullName: 'Ada Lovelace', major: 'CS' };
+
+    const bodies = [
+      { ...valid, email: 'ada@gmail.com' },
+      { ...valid, password: 'correct-horse' },
+      { ...valid, password: '        ' },
+      { ...valid, password: 'Campus Swap1!' },
+      { ...valid, fullName: 'Ada 😀' },
+      { ...valid, fullName: '   ' },
+      { ...valid, major: '' },
+    ];
+    for (const body of bodies) {
+      await request(server).post('/auth/register').send(body).expect(400);
+    }
+    expect(prisma.user.create).not.toHaveBeenCalled();
+  });
+
+  it('logs in and the token opens /auth/me (an older account with a simple password still can)', async () => {
     const login = await request(app.getHttpServer())
       .post('/auth/login')
       .send({ email: 'ada@uni.edu', password: '12345678' })
@@ -123,11 +150,11 @@ describe('Auth (HTTP)', () => {
 
     await request(server)
       .post('/auth/reset-password')
-      .send({ email: 'ada@uni.edu', code: wrong, newPassword: 'brand-new-pass' })
+      .send({ email: 'ada@uni.edu', code: wrong, newPassword: 'BrandNew-Pass1!' })
       .expect(400);
     const reset = await request(server)
       .post('/auth/reset-password')
-      .send({ email: 'ada@uni.edu', code, newPassword: 'brand-new-pass' })
+      .send({ email: 'ada@uni.edu', code, newPassword: 'BrandNew-Pass1!' })
       .expect(200);
     expect(reset.body.accessToken).toEqual(expect.any(String));
     expect(reset.body.user.emailVerifiedAt).toBeTruthy();
@@ -135,16 +162,26 @@ describe('Auth (HTTP)', () => {
     // The code works once, and the new password is the one that logs in.
     await request(server)
       .post('/auth/reset-password')
-      .send({ email: 'ada@uni.edu', code, newPassword: 'another-pass' })
+      .send({ email: 'ada@uni.edu', code, newPassword: 'Another-Pass2!' })
       .expect(400);
-    await request(server).post('/auth/login').send({ email: 'ada@uni.edu', password: 'brand-new-pass' }).expect(200);
+    await request(server).post('/auth/login').send({ email: 'ada@uni.edu', password: 'BrandNew-Pass1!' }).expect(200);
+  });
+
+  it('refuses a weak new password when resetting', async () => {
+    const server = app.getHttpServer();
+    for (const newPassword of ['12345678', 'brand-new-pass', 'Brand New-Pass1!']) {
+      await request(server)
+        .post('/auth/reset-password')
+        .send({ email: 'ada@uni.edu', code: '123456', newPassword })
+        .expect(400);
+    }
   });
 
   it('validates codes and keeps email verification for signed-in users', async () => {
     const server = app.getHttpServer();
     await request(server)
       .post('/auth/reset-password')
-      .send({ email: 'ada@uni.edu', code: '12ab', newPassword: 'brand-new-pass' })
+      .send({ email: 'ada@uni.edu', code: '12ab', newPassword: 'BrandNew-Pass1!' })
       .expect(400);
     await request(server).post('/auth/verify-email/send').expect(401);
     await request(server).post('/auth/verify-email').send({ code: '123456' }).expect(401);

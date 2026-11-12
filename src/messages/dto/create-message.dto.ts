@@ -1,4 +1,5 @@
-import { IsBoolean, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
+import { IsBoolean, IsNotEmpty, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { Trim } from '../../common/validation';
 
 export class CreateMessageDto {
   @IsUUID()
@@ -9,8 +10,10 @@ export class CreateMessageDto {
   @IsUUID()
   senderId?: string;
 
+  // A message of only spaces is empty once trimmed.
+  @Trim()
   @IsString()
-  @MinLength(1)
+  @IsNotEmpty()
   @MaxLength(2000)
   content!: string;
 
