@@ -155,30 +155,83 @@ describe('ExchangesService', () => {
 
     beforeEach(() => tx.material.updateMany.mockResolvedValue({ count: 1 }));
 
-    it('lets the buyer complete: the listing is sold', async () => {
-      prisma.exchange.findUnique.mockResolvedValue(pending);
+    // The row as the database returns it after this side's confirmation is written.
+    const afterConfirm = (fields: Record<string, unknown>) => ({ ...pending, buyerConfirmedAt: null, sellerConfirmedAt: null, ...fields });
 
-      await service.complete(exchangeId, { receivedCondition: 'LIKE_NEW' }, asBuyer);
+    it('the buyer confirming alone does not sell the listing: it waits for the seller', async () => {
+      prisma.exchange.findUnique.mockResolvedValue(pending);
+      tx.exchange.update.mockResolvedValueOnce(afterConfirm({ buyerConfirmedAt: new Date() }));
+
+      const result = await service.complete(exchangeId, { receivedCondition: 'LIKE_NEW' }, asBuyer);
+
+      expect(tx.exchange.update).toHaveBeenCalledTimes(1);
+      expect(tx.exchange.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { buyerConfirmedAt: expect.any(Date), receivedCondition: 'LIKE_NEW' } }),
+      );
+      expect(tx.material.updateMany).not.toHaveBeenCalled();
+      expect(result.status).toBe('PENDING');
+    });
+
+    it('the seller confirming alone does not sell the listing either', async () => {
+      prisma.exchange.findUnique.mockResolvedValue(pending);
+      tx.exchange.update.mockResolvedValueOnce(afterConfirm({ sellerConfirmedAt: new Date() }));
+
+      await service.complete(exchangeId, {}, asSeller);
+
+      expect(tx.exchange.update).toHaveBeenCalledWith(expect.objectContaining({ data: { sellerConfirmedAt: expect.any(Date) } }));
+      expect(tx.material.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('the second confirmation closes the sale: exchange completed and listing sold', async () => {
+      const buyerConfirmedAt = new Date('2026-11-22T15:00:00Z');
+      prisma.exchange.findUnique.mockResolvedValue({ ...pending, buyerConfirmedAt });
+      tx.exchange.update
+        .mockResolvedValueOnce(afterConfirm({ buyerConfirmedAt, sellerConfirmedAt: new Date() }))
+        .mockResolvedValueOnce({ ...pending, status: 'COMPLETED' });
+
+      const result = await service.complete(exchangeId, {}, asSeller);
 
       expect(tx.material.updateMany).toHaveBeenCalledWith({
         where: { id: materialId, status: 'RESERVED' },
         data: { status: 'SOLD' },
       });
-      expect(tx.exchange.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: { status: 'COMPLETED', completedAt: expect.any(Date), receivedCondition: 'LIKE_NEW' },
-        }),
+      expect(tx.exchange.update).toHaveBeenLastCalledWith(
+        expect.objectContaining({ data: { status: 'COMPLETED', completedAt: expect.any(Date) } }),
       );
+      expect(result.status).toBe('COMPLETED');
     });
 
-    it('stores the coordinates measured at the meetup when the buyer sends them', async () => {
+    it('when both confirm at the same moment, the one that sees the other closes the sale', async () => {
+      // The seller's write waited for the buyer's: the returned row already has both confirmations.
       prisma.exchange.findUnique.mockResolvedValue(pending);
+      tx.exchange.update
+        .mockResolvedValueOnce(afterConfirm({ buyerConfirmedAt: new Date(), sellerConfirmedAt: new Date() }))
+        .mockResolvedValueOnce({ ...pending, status: 'COMPLETED' });
+
+      await service.complete(exchangeId, {}, asSeller);
+
+      expect(tx.material.updateMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('confirming again keeps the first time', async () => {
+      const buyerConfirmedAt = new Date('2026-11-22T15:00:00Z');
+      prisma.exchange.findUnique.mockResolvedValue({ ...pending, buyerConfirmedAt });
+      tx.exchange.update.mockResolvedValueOnce(afterConfirm({ buyerConfirmedAt }));
+
+      await service.complete(exchangeId, {}, asBuyer);
+
+      expect(tx.exchange.update).toHaveBeenCalledWith(expect.objectContaining({ data: { buyerConfirmedAt } }));
+    });
+
+    it('stores the coordinates measured at the meetup', async () => {
+      prisma.exchange.findUnique.mockResolvedValue(pending);
+      tx.exchange.update.mockResolvedValueOnce(afterConfirm({ buyerConfirmedAt: new Date() }));
 
       await service.complete(exchangeId, { lat: 4.6031, lng: -74.0648 }, asBuyer);
 
       const [{ data }] = tx.exchange.update.mock.calls[0] as [{ data: Record<string, unknown> }];
-      expect(data).toMatchObject({ status: 'COMPLETED', lat: 4.6031, lng: -74.0648 });
-      expect(data.completedAt).toBeInstanceOf(Date);
+      expect(data).toMatchObject({ lat: 4.6031, lng: -74.0648 });
+      expect(data.buyerConfirmedAt).toBeInstanceOf(Date);
     });
 
     it('rejects a latitude without longitude on completion', async () => {
@@ -188,10 +241,19 @@ describe('ExchangesService', () => {
       expect(tx.exchange.update).not.toHaveBeenCalled();
     });
 
-    it('does not let the seller complete', async () => {
+    it('only the buyer reports the condition the item arrived in', async () => {
       prisma.exchange.findUnique.mockResolvedValue(pending);
 
-      await expect(service.complete(exchangeId, {}, asSeller)).rejects.toThrow(ForbiddenException);
+      await expect(service.complete(exchangeId, { receivedCondition: 'NEW' }, asSeller)).rejects.toThrow(BadRequestException);
+      expect(tx.exchange.update).not.toHaveBeenCalled();
+    });
+
+    it('does not let someone outside the exchange confirm it', async () => {
+      prisma.exchange.findUnique.mockResolvedValue(pending);
+      const stranger = { isAdmin: false, userId: '66666666-6666-4666-8666-666666666666' };
+
+      await expect(service.complete(exchangeId, {}, stranger)).rejects.toThrow(ForbiddenException);
+      expect(tx.exchange.update).not.toHaveBeenCalled();
     });
 
     it('does not complete an exchange without a price', async () => {
@@ -208,12 +270,21 @@ describe('ExchangesService', () => {
       expect(tx.exchange.update).not.toHaveBeenCalled();
     });
 
-    it('does not complete when the listing stopped being reserved while completing', async () => {
+    it('does not sell when the listing stopped being reserved while confirming', async () => {
       prisma.exchange.findUnique.mockResolvedValue(pending);
+      tx.exchange.update.mockResolvedValueOnce(afterConfirm({ buyerConfirmedAt: new Date(), sellerConfirmedAt: new Date() }));
       tx.material.updateMany.mockResolvedValue({ count: 0 });
 
       await expect(service.complete(exchangeId, {}, asBuyer)).rejects.toThrow(ConflictException);
-      expect(tx.exchange.update).not.toHaveBeenCalled();
+      expect(tx.exchange.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('rolls back a confirmation of an exchange that was cancelled meanwhile', async () => {
+      prisma.exchange.findUnique.mockResolvedValue(pending);
+      tx.exchange.update.mockResolvedValueOnce(afterConfirm({ status: 'CANCELLED', buyerConfirmedAt: new Date() }));
+
+      await expect(service.complete(exchangeId, {}, asBuyer)).rejects.toThrow(ConflictException);
+      expect(tx.material.updateMany).not.toHaveBeenCalled();
     });
 
     it('does not complete twice', async () => {

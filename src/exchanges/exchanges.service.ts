@@ -103,14 +103,22 @@ export class ExchangesService {
     });
   }
 
-  /** The buyer checked the item at the meetup: the sale is done and the listing is SOLD. */
+  /**
+   * One side says the meetup happened: the buyer after checking the item, the seller after handing it
+   * over. The sale closes (exchange COMPLETED, listing SOLD) only when both have confirmed, so nobody
+   * can mark a listing as sold alone. Confirming again is harmless and keeps the first time.
+   */
   async complete(id: string, { receivedCondition, lat, lng }: CompleteExchangeDto, auth: AuthContext) {
     const userId = requireUserId(auth);
     if ((lat === undefined) !== (lng === undefined)) {
       throw new BadRequestException('lat and lng must be sent together');
     }
     const exchange = await this.findOne(id, auth);
-    if (exchange.buyerId !== userId) throw new ForbiddenException('Only the buyer can complete the exchange');
+    const side = exchange.buyerId === userId ? 'buyer' : exchange.sellerId === userId ? 'seller' : null;
+    if (!side) throw new ForbiddenException('Only the buyer or the seller can confirm the exchange');
+    if (receivedCondition !== undefined && side !== 'buyer') {
+      throw new BadRequestException('Only the buyer says in what condition the item arrived');
+    }
     this.assertPending(exchange.status);
     // Only a real sale counts for the average ticket: it needs a price and the listing still held for it.
     if (!(Number(exchange.price) > 0)) throw new BadRequestException('An exchange without a price cannot be completed');
@@ -118,7 +126,23 @@ export class ExchangesService {
       throw new ConflictException('This listing is no longer reserved for this exchange');
     }
 
+    const confirmedAt = side === 'buyer' ? 'buyerConfirmedAt' : 'sellerConfirmedAt';
     return this.prisma.$transaction(async (tx) => {
+      // Writing this side's confirmation locks the row: if both sides confirm at the same moment, the
+      // second waits for the first and then sees it, so the sale closes exactly once.
+      const confirmed = await tx.exchange.update({
+        where: { id },
+        data: {
+          [confirmedAt]: exchange[confirmedAt] ?? new Date(),
+          ...(receivedCondition !== undefined && { receivedCondition }),
+          ...(lat !== undefined && { lat, lng }),
+        },
+        include: details,
+      });
+      // Cancelled while confirming: the transaction is rolled back.
+      this.assertPending(confirmed.status);
+      if (!confirmed.buyerConfirmedAt || !confirmed.sellerConfirmedAt) return confirmed;
+
       // Conditional update: if the listing changed since the check above, nothing is sold twice.
       const { count } = await tx.material.updateMany({
         where: { id: exchange.materialId, status: 'RESERVED' },
@@ -127,7 +151,7 @@ export class ExchangesService {
       if (count === 0) throw new ConflictException('This listing is no longer reserved for this exchange');
       return tx.exchange.update({
         where: { id },
-        data: { status: 'COMPLETED', completedAt: new Date(), receivedCondition, ...(lat !== undefined && { lat, lng }) },
+        data: { status: 'COMPLETED', completedAt: new Date() },
         include: details,
       });
     });

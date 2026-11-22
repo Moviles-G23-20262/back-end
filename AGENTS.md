@@ -37,7 +37,7 @@ Decorators in `auth.decorators.ts`: `@Public()` (register, login, health check) 
 ## Domain model, in short
 
 - **Material** is a listing (`AVAILABLE` / `RESERVED` / `SOLD`) with category, condition, price, edition and model, image URLs, and a seller.
-- **Exchange** is an order: `PENDING` (buyer placed it, listing becomes `RESERVED`, seller gets an `ORDER_PLACED` notification), then `COMPLETED` (`completedAt` set, listing becomes `SOLD`) or `CANCELLED` (listing goes back to `AVAILABLE`). A material can have several exchanges over time (a cancelled one, then a new order); only one is active at once.
+- **Exchange** is an order: `PENDING` (buyer placed it, listing becomes `RESERVED`, seller gets an `ORDER_PLACED` notification), then `COMPLETED` or `CANCELLED`. `POST /exchanges/:id/complete` is called by each side after the meetup (the buyer once the item is checked, the seller once it is handed over) and sets `buyerConfirmedAt` or `sellerConfirmedAt`; only when both are set does the exchange become `COMPLETED` (`completedAt` set, listing becomes `SOLD`), so nobody can mark a listing as sold alone. If either side backs out it becomes `CANCELLED` (listing goes back to `AVAILABLE`). A material can have several exchanges over time (a cancelled one, then a new order); only one is active at once.
 - **ChatRoom / Message** are per buyer, seller and material. A `MEETING` message points at a **MeetingProposal** (time window plus a safe **MeetingPoint**) that the other side accepts or declines.
 - **ScheduleBlock** stores each user's weekly class schedule in campus local time (`America/Bogota`) and is used to find free slots shared by two people.
 - **Rating** is one per rater per exchange, only after the exchange is `COMPLETED`; it updates `User.rating`.
