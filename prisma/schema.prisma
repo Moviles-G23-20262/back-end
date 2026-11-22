@@ -123,6 +123,11 @@ model Exchange {
   completedAt DateTime?
   cancelledAt DateTime?
 
+  // Each side confirms that the meetup happened; the exchange is COMPLETED (and the listing SOLD)
+  // only once both have.
+  buyerConfirmedAt  DateTime?
+  sellerConfirmedAt DateTime?
+
   // What the buyer says they received, checked at the meetup.
   receivedCondition MaterialCondition?
 
