@@ -128,6 +128,15 @@ export class MeetingProposalsService {
           content: `Confirmed! See you at ${accepted.meetingPoint.name} on ${formatCampusDate(accepted.startsAt)} at ${formatCampusTime(accepted.startsAt)}.`,
         },
       });
+      await tx.analyticsEvent.create({
+        data: {
+          userId,
+          materialId: room.materialId,
+          eventType: 'MEETING_CONFIRMED',
+          clientCreatedAt: new Date(),
+          metadata: { chatRoomId: room.id, proposalId: id },
+        },
+      });
       return accepted;
     });
   }

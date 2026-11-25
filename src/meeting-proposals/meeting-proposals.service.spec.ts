@@ -9,6 +9,7 @@ describe('MeetingProposalsService', () => {
     meetingProposal: { updateMany: jest.fn(), create: jest.fn(), update: jest.fn() },
     message: { create: jest.fn() },
     exchange: { updateMany: jest.fn() },
+    analyticsEvent: { create: jest.fn() },
   };
   const prisma = {
     chatRoom: { findUnique: jest.fn() },
@@ -103,6 +104,14 @@ describe('MeetingProposalsService', () => {
       });
       expect(tx.message.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ senderId: sellerId, content: expect.stringContaining('Confirmed!') }),
+      });
+      expect(tx.analyticsEvent.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          userId: sellerId,
+          materialId,
+          eventType: 'MEETING_CONFIRMED',
+          metadata: { chatRoomId, proposalId },
+        }),
       });
     });
 

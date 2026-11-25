@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { UpdateMessageDto } from './dto/update-message.dto';
 import { FindMessagesQueryDto } from './dto/find-messages-query.dto';
@@ -12,12 +12,14 @@ const withSender = {
   meetingProposal: { include: { meetingPoint: true } },
 } as const;
 
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
 @Injectable()
 export class MessagesService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(createMessageDto: CreateMessageDto, auth: AuthContext) {
-    const { chatRoomId, content } = createMessageDto;
+    const { id, chatRoomId, content, clientCreatedAt } = createMessageDto;
     const room = await this.prisma.chatRoom.findUnique({
       where: { id: chatRoomId },
       select: { buyerId: true, sellerId: true },
@@ -26,11 +28,48 @@ export class MessagesService {
     this.assertParticipant(room, auth);
 
     const senderId = actingUserId(auth, createMessageDto.senderId, 'senderId');
-    return this.prisma.message.create({
-      // From the app a new message is never "read"; the other side marks it when they open the chat.
-      data: { chatRoomId, senderId, content, isRead: auth.isAdmin ? createMessageDto.isRead : false },
-      include: withSender,
-    });
+    const createdAt = this.resolveCreatedAt(clientCreatedAt);
+
+    try {
+      return await this.prisma.message.create({
+        // From the app a new message is never "read"; the other side marks it when they open the chat.
+        data: {
+          ...(id && { id }),
+          chatRoomId,
+          senderId,
+          content,
+          isRead: auth.isAdmin ? createMessageDto.isRead : false,
+          ...(createdAt && { createdAt }),
+        },
+        include: withSender,
+      });
+    } catch (err: unknown) {
+      // Idempotent offline retry: if the client UUID was already saved by the same sender in this
+      // room, return the existing row instead of duplicating it.
+      const code = typeof err === 'object' && err !== null && 'code' in err ? (err as { code?: unknown }).code : null;
+      if (id && code === 'P2002') {
+        const existing = await this.prisma.message.findUnique({
+          where: { id },
+          include: withSender,
+        });
+        if (existing && existing.senderId === senderId && existing.chatRoomId === chatRoomId) {
+          return existing;
+        }
+        throw new ConflictException(`Message ${id} already exists`);
+      }
+      throw err;
+    }
+  }
+
+  /** Accepts clientCreatedAt only if it is within the last 7 days and not in the future. */
+  private resolveCreatedAt(raw?: string): Date | undefined {
+    if (!raw) return undefined;
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return undefined;
+    const now = Date.now();
+    const ts = parsed.getTime();
+    if (ts > now || ts < now - SEVEN_DAYS_MS) return new Date(now);
+    return parsed;
   }
 
   findAll({ chatRoomId }: FindMessagesQueryDto, auth: AuthContext) {
