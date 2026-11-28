@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma.service';
 import { AuthModule } from './auth.module';
 import { ChatroomsModule } from '../chatrooms/chatrooms.module';
 import { MaterialsModule } from '../materials/materials.module';
+import { MeetingProposalsModule } from '../meeting-proposals/meeting-proposals.module';
 import { MessagesModule } from '../messages/messages.module';
 import { SqlModule } from '../sql/sql.module';
 import { UsersModule } from '../users/users.module';
@@ -24,7 +25,9 @@ describe('Access control (HTTP)', () => {
   const prisma = {
     material: { findMany: jest.fn(), findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
     chatRoom: { findMany: jest.fn(), findUnique: jest.fn(), findFirst: jest.fn(), create: jest.fn() },
-    message: { create: jest.fn() },
+    message: { create: jest.fn(), findUnique: jest.fn() },
+    meetingPoint: { findUnique: jest.fn() },
+    meetingProposal: { findUnique: jest.fn(), updateMany: jest.fn(), create: jest.fn() },
     user: { findUnique: jest.fn() },
     $transaction: jest.fn(),
   };
@@ -33,7 +36,7 @@ describe('Access control (HTTP)', () => {
     process.env.JWT_SECRET = 'test-secret';
     process.env.ADMIN_API_KEY = 'test-admin-key';
     const moduleRef = await Test.createTestingModule({
-      imports: [AuthModule, UsersModule, MaterialsModule, ChatroomsModule, MessagesModule, SqlModule],
+      imports: [AuthModule, UsersModule, MaterialsModule, ChatroomsModule, MessagesModule, MeetingProposalsModule, SqlModule],
       controllers: [AppController],
       providers: [AppService],
     })
@@ -132,6 +135,50 @@ describe('Access control (HTTP)', () => {
     await asMe(request(server()).get(`/chatrooms/${ROOM}`)).expect(403);
     await asMe(request(server()).post('/messages')).send({ chatRoomId: ROOM, content: 'hi' }).expect(403);
     expect(prisma.message.create).not.toHaveBeenCalled();
+  });
+
+  it('replays a text message by ID without creating another bubble', async () => {
+    const id = '3f2b8c1e-0000-4000-8000-0000000000cc';
+    const body = { id, chatRoomId: ROOM, content: 'hi' };
+    const stored = { ...body, senderId: ME, type: 'TEXT' };
+    prisma.chatRoom.findUnique.mockResolvedValue({ buyerId: ME, sellerId: OTHER });
+    prisma.message.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(stored);
+    prisma.message.create.mockResolvedValue(stored);
+
+    await asMe(request(server()).post('/messages')).send(body).expect(201, stored);
+    await asMe(request(server()).post('/messages')).send(body).expect(201, stored);
+
+    expect(prisma.message.create).toHaveBeenCalledTimes(1);
+    expect(prisma.message.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ id }) }),
+    );
+  });
+
+  it('replays a meeting proposal after a lost response without cancelling it or posting another card', async () => {
+    const clientId = '3f2b8c1e-0000-4000-8000-0000000000dd';
+    const meetingPointId = '3f2b8c1e-0000-4000-8000-0000000000ee';
+    const body = {
+      clientId,
+      chatRoomId: ROOM,
+      meetingPointId,
+      startsAt: new Date(Date.now() + 3600_000).toISOString(),
+      endsAt: new Date(Date.now() + 7200_000).toISOString(),
+    };
+    const stored = { id: clientId, chatRoomId: ROOM, proposerId: ME };
+    prisma.chatRoom.findUnique.mockResolvedValue({ id: ROOM, buyerId: ME, sellerId: OTHER });
+    prisma.meetingPoint.findUnique.mockResolvedValue({ id: meetingPointId, name: 'Campus library' });
+    prisma.meetingProposal.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(stored);
+    prisma.meetingProposal.create.mockResolvedValue(stored);
+    prisma.$transaction.mockImplementation((fn: (client: typeof prisma) => unknown) => fn(prisma));
+
+    await asMe(request(server()).post('/meeting-proposals')).send(body).expect(201, stored);
+    await asMe(request(server()).post('/meeting-proposals')).send(body).expect(201, stored);
+
+    expect(prisma.meetingProposal.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ id: clientId }) }),
+    );
+    expect(prisma.meetingProposal.updateMany).toHaveBeenCalledTimes(1);
+    expect(prisma.message.create).toHaveBeenCalledTimes(1);
   });
 
   it('opening a chat picks the seller from the listing and reuses an existing room', async () => {

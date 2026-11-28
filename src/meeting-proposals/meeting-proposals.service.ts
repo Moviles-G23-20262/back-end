@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma.service';
 import { CreateMeetingProposalDto } from './dto/create-meeting-proposal.dto';
 import { UpdateMeetingProposalDto } from './dto/update-meeting-proposal.dto';
@@ -26,8 +27,14 @@ export class MeetingProposalsService {
     const proposerId = actingUserId(auth, dto.proposerId, 'proposerId');
     await this.roomFor(dto.chatRoomId, proposerId);
 
-    const point = await this.prisma.meetingPoint.findUnique({ where: { id: dto.meetingPointId } });
-    if (!point) throw new BadRequestException(`Meeting point ${dto.meetingPointId} not found`);
+    const { clientId, chatRoomId, meetingPointId } = dto;
+    if (clientId) {
+      const existing = await this.findCreatedProposal(clientId, chatRoomId, proposerId);
+      if (existing) return existing;
+    }
+
+    const point = await this.prisma.meetingPoint.findUnique({ where: { id: meetingPointId } });
+    if (!point) throw new BadRequestException('This meeting point is no longer available');
 
     const startsAt = new Date(dto.startsAt);
     const endsAt = new Date(dto.endsAt);
@@ -37,27 +44,45 @@ export class MeetingProposalsService {
       throw new BadRequestException('A meeting can last at most 4 hours');
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      // Only the newest unanswered proposal in a chat stays open.
-      await tx.meetingProposal.updateMany({
-        where: { chatRoomId: dto.chatRoomId, status: 'PENDING' },
-        data: { status: 'CANCELLED', respondedAt: new Date() },
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        // Only the newest unanswered proposal in a chat stays open.
+        await tx.meetingProposal.updateMany({
+          where: { chatRoomId, status: 'PENDING' },
+          data: { status: 'CANCELLED', respondedAt: new Date() },
+        });
+        const proposal = await tx.meetingProposal.create({
+          data: { ...(clientId && { id: clientId }), chatRoomId, proposerId, meetingPointId: point.id, startsAt, endsAt },
+          include: withPoint,
+        });
+        await tx.message.create({
+          data: {
+            chatRoomId,
+            senderId: proposerId,
+            type: 'MEETING',
+            meetingProposalId: proposal.id,
+            content: `Proposed meeting: ${point.name}, ${formatCampusDate(startsAt)} ${formatCampusTime(startsAt)} – ${formatCampusTime(endsAt)}`,
+          },
+        });
+        return proposal;
       });
-      const proposal = await tx.meetingProposal.create({
-        data: { chatRoomId: dto.chatRoomId, proposerId, meetingPointId: point.id, startsAt, endsAt },
-        include: withPoint,
-      });
-      await tx.message.create({
-        data: {
-          chatRoomId: dto.chatRoomId,
-          senderId: proposerId,
-          type: 'MEETING',
-          meetingProposalId: proposal.id,
-          content: `Proposed meeting: ${point.name}, ${formatCampusDate(startsAt)} ${formatCampusTime(startsAt)} – ${formatCampusTime(endsAt)}`,
-        },
-      });
-      return proposal;
-    });
+    } catch (error) {
+      // On a concurrent retry, the primary key rejects the second insert and rolls back
+      // that transaction's cancellation. The only visible result is the original proposal.
+      if (clientId && error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const existing = await this.findCreatedProposal(clientId, chatRoomId, proposerId);
+        if (existing) return existing;
+      }
+      throw error;
+    }
+  }
+
+  private async findCreatedProposal(id: string, chatRoomId: string, proposerId: string) {
+    const existing = await this.prisma.meetingProposal.findUnique({ where: { id }, include: withPoint });
+    if (existing && (existing.chatRoomId !== chatRoomId || existing.proposerId !== proposerId)) {
+      throw new ConflictException('This proposal could not be sent. Please create a new one.');
+    }
+    return existing;
   }
 
   async findAll(chatRoomId: string | undefined, auth: AuthContext) {

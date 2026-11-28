@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma.service';
 import { MeetingProposalsService } from './meeting-proposals.service';
 
@@ -77,6 +78,38 @@ describe('MeetingProposalsService', () => {
       prisma.meetingPoint.findUnique.mockResolvedValue(point);
       const past = { ...dto, startsAt: '2020-01-01T10:00:00Z', endsAt: '2020-01-01T11:00:00Z' };
       await expect(service.create(past, asBuyer)).rejects.toThrow(BadRequestException);
+    });
+
+    it('returns an existing proposal even when its original time has passed', async () => {
+      const existing = { id: proposalId, chatRoomId, proposerId: buyerId, status: 'ACCEPTED' };
+      prisma.meetingProposal.findUnique.mockResolvedValue(existing);
+      const replay = {
+        ...dto,
+        clientId: proposalId,
+        startsAt: '2020-01-01T10:00:00Z',
+        endsAt: '2020-01-01T11:00:00Z',
+      };
+
+      await expect(service.create(replay, asBuyer)).resolves.toEqual(existing);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('returns the committed proposal after a concurrent insert with the same ID', async () => {
+      const existing = { id: proposalId, chatRoomId, proposerId: buyerId };
+      prisma.meetingPoint.findUnique.mockResolvedValue(point);
+      prisma.meetingProposal.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(existing);
+      tx.meetingProposal.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Duplicate key', { code: 'P2002', clientVersion: 'test' }),
+      );
+
+      await expect(service.create({ ...dto, clientId: proposalId }, asBuyer)).resolves.toEqual(existing);
+      expect(tx.message.create).not.toHaveBeenCalled();
+    });
+
+    it('does not return another participant’s proposal when they share a room', async () => {
+      prisma.meetingProposal.findUnique.mockResolvedValue({ id: proposalId, chatRoomId, proposerId: sellerId });
+      await expect(service.create({ ...dto, clientId: proposalId }, asBuyer)).rejects.toThrow(ConflictException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
     });
   });
 
