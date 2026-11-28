@@ -2,6 +2,10 @@ import { IsBoolean, IsNotEmpty, IsOptional, IsString, IsUUID, MaxLength } from '
 import { Trim } from '../../common/validation';
 
 export class CreateMessageDto {
+  @IsOptional()
+  @IsUUID()
+  id?: string;
+
   @IsUUID()
   chatRoomId!: string;
 

@@ -1,4 +1,5 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '../generated/prisma/client';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { UpdateMessageDto } from './dto/update-message.dto';
 import { FindMessagesQueryDto } from './dto/find-messages-query.dto';
@@ -17,7 +18,7 @@ export class MessagesService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(createMessageDto: CreateMessageDto, auth: AuthContext) {
-    const { chatRoomId, content } = createMessageDto;
+    const { id, chatRoomId, content } = createMessageDto;
     const room = await this.prisma.chatRoom.findUnique({
       where: { id: chatRoomId },
       select: { buyerId: true, sellerId: true },
@@ -26,11 +27,31 @@ export class MessagesService {
     this.assertParticipant(room, auth);
 
     const senderId = actingUserId(auth, createMessageDto.senderId, 'senderId');
-    return this.prisma.message.create({
-      // From the app a new message is never "read"; the other side marks it when they open the chat.
-      data: { chatRoomId, senderId, content, isRead: auth.isAdmin ? createMessageDto.isRead : false },
-      include: withSender,
-    });
+    if (id) {
+      const existing = await this.findSentMessage(id, chatRoomId, senderId);
+      if (existing) return existing;
+    }
+    try {
+      return await this.prisma.message.create({
+        // The other side marks an app message as read when they open the chat.
+        data: { ...(id && { id }), chatRoomId, senderId, content, isRead: auth.isAdmin ? createMessageDto.isRead : false },
+        include: withSender,
+      });
+    } catch (error) {
+      if (id && error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const existing = await this.findSentMessage(id, chatRoomId, senderId);
+        if (existing) return existing;
+      }
+      throw error;
+    }
+  }
+
+  private async findSentMessage(id: string, chatRoomId: string, senderId: string) {
+    const existing = await this.prisma.message.findUnique({ where: { id }, include: withSender });
+    if (existing && (existing.chatRoomId !== chatRoomId || existing.senderId !== senderId || existing.type !== 'TEXT')) {
+      throw new ConflictException('This message could not be sent. Please write a new one.');
+    }
+    return existing;
   }
 
   findAll({ chatRoomId }: FindMessagesQueryDto, auth: AuthContext) {

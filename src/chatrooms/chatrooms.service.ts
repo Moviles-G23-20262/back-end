@@ -16,30 +16,31 @@ export class ChatroomsService {
 
   async create(createChatroomDto: CreateChatroomDto, auth: AuthContext) {
     const { materialId } = createChatroomDto;
-    const material = await this.prisma.material.findUnique({
-      where: { id: materialId },
-      select: { sellerId: true },
-    });
-    if (!material) throw new NotFoundException(`Material ${materialId} not found`);
+    return this.prisma.$transaction(async (tx) => {
+      // Serialize room creation for this listing. The lookup after the lock can see
+      // a room created by the request that held it before us.
+      const [material] = await tx.$queryRaw<{ sellerId: string }[]>`
+        SELECT "sellerId" FROM "Material" WHERE "id" = ${materialId}::uuid FOR NO KEY UPDATE
+      `;
+      if (!material) throw new NotFoundException(`Material ${materialId} not found`);
 
-    const buyerId = actingUserId(auth, createChatroomDto.buyerId, 'buyerId');
-    // Nobody picks who the seller is: it is whoever owns the listing.
-    const sellerId = auth.isAdmin ? (createChatroomDto.sellerId ?? material.sellerId) : material.sellerId;
-    if (buyerId === sellerId) {
-      throw new BadRequestException('Buyer and seller must be different users');
-    }
+      const buyerId = actingUserId(auth, createChatroomDto.buyerId, 'buyerId');
+      const sellerId = auth.isAdmin ? (createChatroomDto.sellerId ?? material.sellerId) : material.sellerId;
+      if (buyerId === sellerId) {
+        throw new BadRequestException('Buyer and seller must be different users');
+      }
 
-    // Tapping "Message seller" twice must open the same conversation.
-    const existing = await this.prisma.chatRoom.findFirst({
-      where: { materialId, buyerId },
-      include: { material: true, ...parties },
-    });
-    if (existing) return existing;
+      const existing = await tx.chatRoom.findFirst({
+        where: { materialId, buyerId },
+        include: { material: true, ...parties },
+      });
+      if (existing) return existing;
 
-    return this.prisma.chatRoom.create({
-      data: { materialId, buyerId, sellerId },
-      include: { material: true, ...parties },
-    });
+      return tx.chatRoom.create({
+        data: { materialId, buyerId, sellerId },
+        include: { material: true, ...parties },
+      });
+    }, { isolationLevel: 'ReadCommitted' });
   }
 
   /** Conversation list: the caller's rooms with the last message and how many are unread. */

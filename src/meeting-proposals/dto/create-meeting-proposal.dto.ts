@@ -1,6 +1,11 @@
 import { IsDateString, IsOptional, IsUUID } from 'class-validator';
 
 export class CreateMeetingProposalDto {
+  // A retry reuses this identifier so it returns the proposal already created.
+  @IsOptional()
+  @IsUUID()
+  clientId?: string;
+
   @IsUUID()
   chatRoomId!: string;
 
