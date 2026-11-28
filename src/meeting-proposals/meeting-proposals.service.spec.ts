@@ -7,7 +7,9 @@ import { MeetingProposalsService } from './meeting-proposals.service';
 describe('MeetingProposalsService', () => {
   let service: MeetingProposalsService;
   const tx = {
-    meetingProposal: { updateMany: jest.fn(), create: jest.fn(), update: jest.fn() },
+    $queryRaw: jest.fn(),
+    meetingPoint: { findUnique: jest.fn() },
+    meetingProposal: { findUnique: jest.fn(), updateMany: jest.fn(), create: jest.fn(), update: jest.fn() },
     message: { create: jest.fn() },
     exchange: { updateMany: jest.fn() },
   };
@@ -35,6 +37,7 @@ describe('MeetingProposalsService', () => {
     jest.resetAllMocks();
     prisma.$transaction.mockImplementation((fn: (client: typeof tx) => unknown) => fn(tx));
     prisma.chatRoom.findUnique.mockResolvedValue(room);
+    tx.$queryRaw.mockResolvedValue([room]);
     const module: TestingModule = await Test.createTestingModule({
       providers: [MeetingProposalsService, { provide: PrismaService, useValue: prisma }],
     }).compile();
@@ -50,7 +53,7 @@ describe('MeetingProposalsService', () => {
     };
 
     it('replaces the open proposal and posts a meeting card in the chat', async () => {
-      prisma.meetingPoint.findUnique.mockResolvedValue(point);
+      tx.meetingPoint.findUnique.mockResolvedValue(point);
       tx.meetingProposal.create.mockResolvedValue({ id: proposalId });
 
       await service.create(dto, asBuyer);
@@ -75,14 +78,14 @@ describe('MeetingProposalsService', () => {
     });
 
     it('rejects a meeting in the past', async () => {
-      prisma.meetingPoint.findUnique.mockResolvedValue(point);
+      tx.meetingPoint.findUnique.mockResolvedValue(point);
       const past = { ...dto, startsAt: '2020-01-01T10:00:00Z', endsAt: '2020-01-01T11:00:00Z' };
       await expect(service.create(past, asBuyer)).rejects.toThrow(BadRequestException);
     });
 
     it('returns an existing proposal even when its original time has passed', async () => {
       const existing = { id: proposalId, chatRoomId, proposerId: buyerId, status: 'ACCEPTED' };
-      prisma.meetingProposal.findUnique.mockResolvedValue(existing);
+      tx.meetingProposal.findUnique.mockResolvedValue(existing);
       const replay = {
         ...dto,
         clientId: proposalId,
@@ -91,13 +94,15 @@ describe('MeetingProposalsService', () => {
       };
 
       await expect(service.create(replay, asBuyer)).resolves.toEqual(existing);
-      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(tx.meetingProposal.updateMany).not.toHaveBeenCalled();
+      expect(tx.message.create).not.toHaveBeenCalled();
     });
 
     it('returns the committed proposal after a concurrent insert with the same ID', async () => {
       const existing = { id: proposalId, chatRoomId, proposerId: buyerId };
-      prisma.meetingPoint.findUnique.mockResolvedValue(point);
-      prisma.meetingProposal.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(existing);
+      tx.meetingPoint.findUnique.mockResolvedValue(point);
+      tx.meetingProposal.findUnique.mockResolvedValue(null);
+      prisma.meetingProposal.findUnique.mockResolvedValue(existing);
       tx.meetingProposal.create.mockRejectedValue(
         new Prisma.PrismaClientKnownRequestError('Duplicate key', { code: 'P2002', clientVersion: 'test' }),
       );
@@ -107,9 +112,9 @@ describe('MeetingProposalsService', () => {
     });
 
     it('does not return another participant’s proposal when they share a room', async () => {
-      prisma.meetingProposal.findUnique.mockResolvedValue({ id: proposalId, chatRoomId, proposerId: sellerId });
+      tx.meetingProposal.findUnique.mockResolvedValue({ id: proposalId, chatRoomId, proposerId: sellerId });
       await expect(service.create({ ...dto, clientId: proposalId }, asBuyer)).rejects.toThrow(ConflictException);
-      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(tx.meetingProposal.updateMany).not.toHaveBeenCalled();
     });
   });
 
@@ -124,8 +129,12 @@ describe('MeetingProposalsService', () => {
       status: 'PENDING',
     };
 
-    it('accepting confirms it, updates the pending order and posts a confirmation', async () => {
+    beforeEach(() => {
       prisma.meetingProposal.findUnique.mockResolvedValue(pending);
+      tx.meetingProposal.findUnique.mockResolvedValue(pending);
+    });
+
+    it('accepting confirms it, updates the pending order and posts a confirmation', async () => {
       tx.meetingProposal.update.mockResolvedValue({ ...pending, status: 'ACCEPTED', meetingPoint: point });
 
       await service.accept(proposalId, asSeller);
@@ -137,16 +146,45 @@ describe('MeetingProposalsService', () => {
       expect(tx.message.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ senderId: sellerId, content: expect.stringContaining('Confirmed!') }),
       });
+      expect(tx.meetingProposal.updateMany).toHaveBeenCalledWith({
+        where: { chatRoomId, status: 'ACCEPTED', id: { not: proposalId } },
+        data: { status: 'CANCELLED' },
+      });
     });
 
     it('the proposer cannot accept their own proposal', async () => {
-      prisma.meetingProposal.findUnique.mockResolvedValue(pending);
       await expect(service.accept(proposalId, asBuyer)).rejects.toThrow(ForbiddenException);
     });
 
     it('a proposal can only be answered once', async () => {
-      prisma.meetingProposal.findUnique.mockResolvedValue({ ...pending, status: 'DECLINED' });
+      tx.meetingProposal.findUnique.mockResolvedValue({ ...pending, status: 'DECLINED' });
       await expect(service.accept(proposalId, asSeller)).rejects.toThrow(ConflictException);
+    });
+
+    it('returns the winning acceptance if another request accepted while waiting for the lock', async () => {
+      const accepted = { ...pending, status: 'ACCEPTED', meetingPoint: point };
+      tx.meetingProposal.findUnique.mockResolvedValue(accepted);
+
+      await expect(service.accept(proposalId, asSeller)).resolves.toEqual(accepted);
+      expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(tx.meetingProposal.findUnique.mock.invocationCallOrder[0]);
+      expect(tx.meetingProposal.update).not.toHaveBeenCalled();
+      expect(tx.exchange.updateMany).not.toHaveBeenCalled();
+      expect(tx.message.create).not.toHaveBeenCalled();
+    });
+
+    it('cannot accept a proposal withdrawn while waiting for the lock', async () => {
+      tx.meetingProposal.findUnique.mockResolvedValue({ ...pending, status: 'CANCELLED' });
+
+      await expect(service.accept(proposalId, asSeller)).rejects.toThrow(ConflictException);
+      expect(tx.meetingProposal.update).not.toHaveBeenCalled();
+      expect(tx.message.create).not.toHaveBeenCalled();
+    });
+
+    it('cannot withdraw a proposal accepted while waiting for the lock', async () => {
+      tx.meetingProposal.findUnique.mockResolvedValue({ ...pending, status: 'ACCEPTED' });
+
+      await expect(service.cancel(proposalId, asBuyer)).rejects.toThrow(ConflictException);
+      expect(tx.meetingProposal.update).not.toHaveBeenCalled();
     });
   });
 

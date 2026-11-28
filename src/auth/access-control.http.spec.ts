@@ -29,6 +29,7 @@ describe('Access control (HTTP)', () => {
     meetingPoint: { findUnique: jest.fn() },
     meetingProposal: { findUnique: jest.fn(), updateMany: jest.fn(), create: jest.fn() },
     user: { findUnique: jest.fn() },
+    $queryRaw: jest.fn(),
     $transaction: jest.fn(),
   };
 
@@ -49,7 +50,10 @@ describe('Access control (HTTP)', () => {
     token = await app.get(JwtService).signAsync({ sub: ME, email: 'me@uni.edu' });
   });
 
-  beforeEach(() => jest.resetAllMocks());
+  beforeEach(() => {
+    jest.resetAllMocks();
+    prisma.$transaction.mockImplementation((fn: (client: typeof prisma) => unknown) => fn(prisma));
+  });
 
   afterAll(() => app.close());
 
@@ -165,11 +169,10 @@ describe('Access control (HTTP)', () => {
       endsAt: new Date(Date.now() + 7200_000).toISOString(),
     };
     const stored = { id: clientId, chatRoomId: ROOM, proposerId: ME };
-    prisma.chatRoom.findUnique.mockResolvedValue({ id: ROOM, buyerId: ME, sellerId: OTHER });
+    prisma.$queryRaw.mockResolvedValue([{ id: ROOM, buyerId: ME, sellerId: OTHER }]);
     prisma.meetingPoint.findUnique.mockResolvedValue({ id: meetingPointId, name: 'Campus library' });
     prisma.meetingProposal.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(stored);
     prisma.meetingProposal.create.mockResolvedValue(stored);
-    prisma.$transaction.mockImplementation((fn: (client: typeof prisma) => unknown) => fn(prisma));
 
     await asMe(request(server()).post('/meeting-proposals')).send(body).expect(201, stored);
     await asMe(request(server()).post('/meeting-proposals')).send(body).expect(201, stored);
@@ -182,7 +185,7 @@ describe('Access control (HTTP)', () => {
   });
 
   it('opening a chat picks the seller from the listing and reuses an existing room', async () => {
-    prisma.material.findUnique.mockResolvedValue({ sellerId: OTHER });
+    prisma.$queryRaw.mockResolvedValue([{ sellerId: OTHER }]);
     prisma.chatRoom.findFirst.mockResolvedValue(null);
     prisma.chatRoom.create.mockResolvedValue({ id: ROOM });
 
@@ -194,6 +197,11 @@ describe('Access control (HTTP)', () => {
       buyerId: ME,
       sellerId: OTHER,
     });
+    expect(prisma.$queryRaw).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.stringContaining('FOR NO KEY UPDATE'),
+    ]), MATERIAL);
+    expect(prisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(prisma.chatRoom.findFirst.mock.invocationCallOrder[0]);
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'ReadCommitted' });
 
     prisma.chatRoom.findFirst.mockResolvedValue({ id: 'existing' });
     prisma.chatRoom.create.mockClear();
@@ -202,7 +210,7 @@ describe('Access control (HTTP)', () => {
   });
 
   it('you cannot open a chat with yourself on your own listing', async () => {
-    prisma.material.findUnique.mockResolvedValue({ sellerId: ME });
+    prisma.$queryRaw.mockResolvedValue([{ sellerId: ME }]);
 
     await asMe(request(server()).post('/chatrooms')).send({ materialId: MATERIAL }).expect(400);
   });

@@ -8,7 +8,7 @@ describe('ExchangesService', () => {
   const tx = {
     material: { updateMany: jest.fn(), update: jest.fn(), findUnique: jest.fn() },
     meetingProposal: { findFirst: jest.fn() },
-    exchange: { create: jest.fn(), update: jest.fn() },
+    exchange: { create: jest.fn(), update: jest.fn(), updateMany: jest.fn(), findUniqueOrThrow: jest.fn() },
     notification: { create: jest.fn() },
   };
   const prisma = {
@@ -295,16 +295,30 @@ describe('ExchangesService', () => {
 
     it('puts the listing back on the market when cancelled', async () => {
       prisma.exchange.findUnique.mockResolvedValue(pending);
+      tx.exchange.updateMany.mockResolvedValue({ count: 1 });
+      const cancelled = { ...pending, status: 'CANCELLED', material: { status: 'AVAILABLE' } };
+      tx.exchange.findUniqueOrThrow.mockResolvedValue(cancelled);
 
-      await service.cancel(exchangeId, asSeller);
+      await expect(service.cancel(exchangeId, asSeller)).resolves.toEqual(cancelled);
 
       expect(tx.material.updateMany).toHaveBeenCalledWith({
         where: { id: materialId, status: 'RESERVED' },
         data: { status: 'AVAILABLE' },
       });
-      expect(tx.exchange.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: { status: 'CANCELLED', cancelledAt: expect.any(Date) } }),
-      );
+      expect(tx.exchange.updateMany).toHaveBeenCalledWith({
+        where: { id: exchangeId, status: 'PENDING' },
+        data: { status: 'CANCELLED', cancelledAt: expect.any(Date) },
+      });
+      expect(tx.exchange.updateMany.mock.invocationCallOrder[0]).toBeLessThan(tx.material.updateMany.mock.invocationCallOrder[0]);
+    });
+
+    it('does not release the listing if confirmation closed the exchange before cancellation could write', async () => {
+      prisma.exchange.findUnique.mockResolvedValue(pending);
+      tx.exchange.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.cancel(exchangeId, asSeller)).rejects.toThrow(ConflictException);
+      expect(tx.material.updateMany).not.toHaveBeenCalled();
+      expect(tx.exchange.findUniqueOrThrow).not.toHaveBeenCalled();
     });
   });
 });

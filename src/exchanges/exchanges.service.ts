@@ -164,15 +164,19 @@ export class ExchangesService {
     this.assertPending(exchange.status);
 
     return this.prisma.$transaction(async (tx) => {
+      // Confirming takes the exchange lock first too. Only the request that finds it
+      // still pending is allowed to release the reservation.
+      const { count } = await tx.exchange.updateMany({
+        where: { id, status: 'PENDING' },
+        data: { status: 'CANCELLED', cancelledAt: new Date() },
+      });
+      if (count === 0) throw new ConflictException('This exchange was already closed');
+
       await tx.material.updateMany({
         where: { id: exchange.materialId, status: 'RESERVED' },
         data: { status: 'AVAILABLE' },
       });
-      return tx.exchange.update({
-        where: { id },
-        data: { status: 'CANCELLED', cancelledAt: new Date() },
-        include: details,
-      });
+      return tx.exchange.findUniqueOrThrow({ where: { id }, include: details });
     });
   }
 
